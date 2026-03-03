@@ -25,6 +25,8 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		return nil
 	case "init":
 		return a.runInit(ctx, args[1:])
+	case "config":
+		return a.runConfig(ctx)
 	case "create":
 		return a.runCreate(ctx, args[1:])
 	case "show":
@@ -38,13 +40,17 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	case "update":
 		return a.runUpdate(ctx, args[1:])
 	case "close":
-		return a.runStatusChange(ctx, args[1:], StatusClosed)
+		return a.runClose(ctx, args[1:])
 	case "reopen":
 		return a.runReopen(ctx, args[1:])
 	case "cancel":
 		return a.runStatusChange(ctx, args[1:], StatusCancelled)
 	case "ready":
 		return a.runReady(ctx, args[1:])
+	case "claim":
+		return a.runClaim(ctx, args[1:])
+	case "unclaim":
+		return a.runUnclaim(ctx, args[1:])
 	case "dep":
 		return a.runDependency(ctx, args[1:])
 	case "note":
@@ -90,6 +96,24 @@ func (a *App) runInit(ctx context.Context, args []string) error {
 	}
 
 	return PrintJSON(map[string]any{"prefix": resolved})
+}
+
+func (a *App) runConfig(ctx context.Context) error {
+	prefix, err := a.ensureProjectPrefix(ctx)
+	if err != nil {
+		return err
+	}
+
+	var version int
+	err = a.db.QueryRowContext(ctx, `SELECT version FROM schema_version WHERE id = 1`).Scan(&version)
+	if err != nil {
+		return err
+	}
+
+	return PrintJSON(map[string]any{
+		"prefix":         prefix,
+		"schema_version": version,
+	})
 }
 
 func (a *App) runCreate(ctx context.Context, args []string) error {
@@ -555,6 +579,161 @@ func (a *App) runStatusChange(ctx context.Context, args []string, nextStatus str
 	return PrintJSON(updated)
 }
 
+func (a *App) runClaim(ctx context.Context, args []string) error {
+	if len(args) != 2 {
+		return &CLIError{Code: "usage", Message: "usage: ait claim <id> <agent-name>", ExitCode: 64}
+	}
+	internalID, err := a.resolveIssueID(ctx, args[0])
+	if err != nil {
+		return err
+	}
+	agentName := strings.TrimSpace(args[1])
+	if agentName == "" {
+		return &CLIError{Code: "validation", Message: "agent name is required", ExitCode: 65}
+	}
+
+	current, err := a.fetchIssueByInternalID(ctx, internalID)
+	if err != nil {
+		return err
+	}
+	if current.ClaimedBy != nil {
+		return &CLIError{
+			Code:     "conflict",
+			Message:  fmt.Sprintf("issue %s is already claimed by %s", current.ID, *current.ClaimedBy),
+			ExitCode: 65,
+		}
+	}
+
+	now := NowUTC()
+	_, err = a.db.ExecContext(ctx,
+		`UPDATE issues SET claimed_by = ?, claimed_at = ?, updated_at = ? WHERE id = ?`,
+		agentName, now, now, internalID,
+	)
+	if err != nil {
+		return err
+	}
+
+	updated, err := a.fetchIssueByInternalID(ctx, internalID)
+	if err != nil {
+		return err
+	}
+	return PrintJSON(updated)
+}
+
+func (a *App) runUnclaim(ctx context.Context, args []string) error {
+	if len(args) != 1 {
+		return &CLIError{Code: "usage", Message: "usage: ait unclaim <id>", ExitCode: 64}
+	}
+	internalID, err := a.resolveIssueID(ctx, args[0])
+	if err != nil {
+		return err
+	}
+
+	now := NowUTC()
+	_, err = a.db.ExecContext(ctx,
+		`UPDATE issues SET claimed_by = NULL, claimed_at = NULL, updated_at = ? WHERE id = ?`,
+		now, internalID,
+	)
+	if err != nil {
+		return err
+	}
+
+	updated, err := a.fetchIssueByInternalID(ctx, internalID)
+	if err != nil {
+		return err
+	}
+	return PrintJSON(updated)
+}
+
+func (a *App) runClose(ctx context.Context, args []string) error {
+	// Extract --cascade from anywhere in the args since flag.Parse stops
+	// at the first non-flag argument and the ID is positional.
+	cascade := false
+	var filtered []string
+	for _, arg := range args {
+		if arg == "--cascade" {
+			cascade = true
+		} else {
+			filtered = append(filtered, arg)
+		}
+	}
+
+	if len(filtered) != 1 {
+		return &CLIError{Code: "usage", Message: "usage: ait close <id> [--cascade]", ExitCode: 64}
+	}
+
+	if cascade {
+		return a.runCascadeClose(ctx, filtered[0])
+	}
+	return a.runStatusChange(ctx, filtered, StatusClosed)
+}
+
+func (a *App) runCascadeClose(ctx context.Context, key string) error {
+	internalID, err := a.resolveIssueID(ctx, key)
+	if err != nil {
+		return err
+	}
+
+	now := NowUTC()
+	closed := make([]IssueRef, 0)
+
+	var closeTree func(id int64) error
+	closeTree = func(id int64) error {
+		issue, err := a.fetchIssueByInternalID(ctx, id)
+		if err != nil {
+			return err
+		}
+
+		// Only close issues that are open or in_progress.
+		if issue.Status == StatusOpen || issue.Status == StatusInProgress {
+			if _, err := a.db.ExecContext(ctx,
+				`UPDATE issues SET status = ?, updated_at = ?, closed_at = ? WHERE id = ?`,
+				StatusClosed, now, now, id,
+			); err != nil {
+				return err
+			}
+			closed = append(closed, IssueRef{
+				ID:       issue.ID,
+				Title:    issue.Title,
+				Status:   StatusClosed,
+				Type:     issue.Type,
+				Priority: issue.Priority,
+			})
+		}
+
+		// Recurse into children.
+		rows, err := a.db.QueryContext(ctx, `SELECT id FROM issues WHERE parent_id = ?`, id)
+		if err != nil {
+			return err
+		}
+		var childIDs []int64
+		for rows.Next() {
+			var childID int64
+			if err := rows.Scan(&childID); err != nil {
+				rows.Close()
+				return err
+			}
+			childIDs = append(childIDs, childID)
+		}
+		if err := rows.Close(); err != nil {
+			return err
+		}
+
+		for _, childID := range childIDs {
+			if err := closeTree(childID); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+
+	if err := closeTree(internalID); err != nil {
+		return err
+	}
+
+	return PrintJSON(map[string]any{"closed": closed})
+}
+
 func (a *App) runReopen(ctx context.Context, args []string) error {
 	if len(args) != 1 {
 		return &CLIError{Code: "usage", Message: "usage: ait reopen <id>", ExitCode: 64}
@@ -850,6 +1029,7 @@ const helpText = `Usage: ait [--db <path>] <command> [options]
 
 Commands:
   init    --prefix <value>                   Set project prefix for issue IDs
+  config                                     Show project configuration
   create  --title <t> [--type] [--parent]    Create a new issue
           [--description] [--priority]
   show    <id>                               Show issue details and notes
@@ -860,9 +1040,11 @@ Commands:
   status                                     Show project summary counts
   ready   [--type] [--long]                  List unblocked issues
   update  <id> --title|--status|--priority   Update an issue
-  close   <id>                               Close an issue
+  close   <id> [--cascade]                    Close an issue (or subtree)
   reopen  <id>                               Reopen a closed/cancelled issue
   cancel  <id>                               Cancel an issue
+  claim   <id> <agent-name>                  Claim an issue for an agent
+  unclaim <id>                               Release a claim
   dep     add|remove|list|tree <id> [<id>]   Manage dependencies
   note    add|list <id> [body]               Manage notes
   help                                       Show this help

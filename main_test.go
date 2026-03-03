@@ -1073,3 +1073,335 @@ func TestCreateInvalidType(t *testing.T) {
 		}
 	})
 }
+
+// --- Schema versioning tests ---
+
+func TestSchemaVersionTableCreatedOnFreshDB(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "fresh.db")
+
+	ctx := context.Background()
+	app, err := ait.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer app.Close()
+
+	// Verify schema_version table exists and has a version
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open raw db: %v", err)
+	}
+	defer db.Close()
+
+	var version int
+	if err := db.QueryRow(`SELECT version FROM schema_version WHERE id = 1`).Scan(&version); err != nil {
+		t.Fatalf("expected schema_version row: %v", err)
+	}
+	if version < 1 {
+		t.Fatalf("expected version >= 1, got %d", version)
+	}
+}
+
+func TestSchemaVersionSetOnPreExistingDB(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "existing.db")
+
+	// Create a DB with the current schema but no schema_version table
+	// (simulates a pre-migration database).
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	_, err = db.Exec(`CREATE TABLE issues (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		legacy_id TEXT UNIQUE,
+		public_id TEXT UNIQUE,
+		type TEXT NOT NULL CHECK (type IN ('task', 'epic')),
+		title TEXT NOT NULL,
+		description TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL CHECK (status IN ('open', 'in_progress', 'closed', 'cancelled')),
+		parent_id INTEGER NULL,
+		priority TEXT NOT NULL DEFAULT 'P2' CHECK (priority IN ('P0', 'P1', 'P2', 'P3', 'P4')),
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL,
+		closed_at TEXT NULL,
+		FOREIGN KEY (parent_id) REFERENCES issues(id)
+	)`)
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	db.Close()
+
+	ctx := context.Background()
+	app, err := ait.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer app.Close()
+
+	// Verify schema_version was backfilled
+	db2, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer db2.Close()
+
+	var version int
+	if err := db2.QueryRow(`SELECT version FROM schema_version WHERE id = 1`).Scan(&version); err != nil {
+		t.Fatalf("expected schema_version row: %v", err)
+	}
+	if version < 1 {
+		t.Fatalf("expected version >= 1, got %d", version)
+	}
+}
+
+// --- Cascade close tests ---
+
+func TestCascadeCloseClosesEpicAndChildren(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var epic ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Epic", "--type", "epic"}, &epic)
+		var child1 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Child 1", "--parent", epic.ID}, &child1)
+		var child2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Child 2", "--parent", epic.ID}, &child2)
+
+		var result struct {
+			Closed []ait.IssueRef `json:"closed"`
+		}
+		runJSONCommand(t, a, []string{"close", epic.ID, "--cascade"}, &result)
+
+		if len(result.Closed) != 3 {
+			t.Fatalf("expected 3 closed issues, got %d", len(result.Closed))
+		}
+
+		// Verify all are actually closed
+		for _, id := range []string{epic.ID, child1.ID, child2.ID} {
+			var shown ait.ShowResponse
+			runJSONCommand(t, a, []string{"show", id}, &shown)
+			if shown.Issue.Status != ait.StatusClosed {
+				t.Fatalf("expected %s to be closed, got %s", id, shown.Issue.Status)
+			}
+		}
+	})
+}
+
+func TestCascadeCloseSkipsAlreadyClosed(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var epic ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Epic", "--type", "epic"}, &epic)
+		var child ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Child", "--parent", epic.ID}, &child)
+
+		// Close the child first
+		runJSONCommand[ait.Issue](t, a, []string{"close", child.ID}, nil)
+
+		var result struct {
+			Closed []ait.IssueRef `json:"closed"`
+		}
+		runJSONCommand(t, a, []string{"close", epic.ID, "--cascade"}, &result)
+
+		// Only the epic should be in the closed list (child was already closed)
+		if len(result.Closed) != 1 {
+			t.Fatalf("expected 1 newly closed issue, got %d", len(result.Closed))
+		}
+		if result.Closed[0].ID != epic.ID {
+			t.Fatalf("expected epic %s to be closed, got %s", epic.ID, result.Closed[0].ID)
+		}
+	})
+}
+
+func TestCascadeCloseGrandchildren(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var epic ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Epic", "--type", "epic"}, &epic)
+		var child ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Child", "--parent", epic.ID}, &child)
+		var grandchild ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Grandchild", "--parent", child.ID}, &grandchild)
+
+		var result struct {
+			Closed []ait.IssueRef `json:"closed"`
+		}
+		runJSONCommand(t, a, []string{"close", epic.ID, "--cascade"}, &result)
+
+		if len(result.Closed) != 3 {
+			t.Fatalf("expected 3 closed issues, got %d", len(result.Closed))
+		}
+
+		var shown ait.ShowResponse
+		runJSONCommand(t, a, []string{"show", grandchild.ID}, &shown)
+		if shown.Issue.Status != ait.StatusClosed {
+			t.Fatalf("expected grandchild to be closed, got %s", shown.Issue.Status)
+		}
+	})
+}
+
+func TestCloseWithoutCascadeStillWorks(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var epic ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Epic", "--type", "epic"}, &epic)
+		var child ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Child", "--parent", epic.ID}, &child)
+
+		var closed ait.Issue
+		runJSONCommand(t, a, []string{"close", epic.ID}, &closed)
+		if closed.Status != ait.StatusClosed {
+			t.Fatalf("expected closed, got %s", closed.Status)
+		}
+
+		// Child should still be open
+		var shown ait.ShowResponse
+		runJSONCommand(t, a, []string{"show", child.ID}, &shown)
+		if shown.Issue.Status != ait.StatusOpen {
+			t.Fatalf("expected child still open, got %s", shown.Issue.Status)
+		}
+	})
+}
+
+// --- Claim/unclaim tests ---
+
+// --- Config command tests ---
+
+func TestConfigShowsPrefixAndVersion(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "myproject"}, nil)
+
+		var config struct {
+			Prefix        string `json:"prefix"`
+			SchemaVersion int    `json:"schema_version"`
+		}
+		runJSONCommand(t, a, []string{"config"}, &config)
+
+		if config.Prefix != "myproject" {
+			t.Fatalf("expected prefix 'myproject', got %q", config.Prefix)
+		}
+		if config.SchemaVersion < 1 {
+			t.Fatalf("expected schema_version >= 1, got %d", config.SchemaVersion)
+		}
+	})
+}
+
+// --- Ready prioritisation tests ---
+
+func TestReadyOrdersByPriorityThenCreation(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		// Create in reverse priority order
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Low pri", "--priority", "P3"}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "High pri", "--priority", "P0"}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Mid pri", "--priority", "P1"}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Also mid", "--priority", "P1"}, nil)
+
+		var ready struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"ready"}, &ready)
+
+		if len(ready.Issues) != 4 {
+			t.Fatalf("expected 4 ready issues, got %d", len(ready.Issues))
+		}
+
+		// P0 first, then P1s in creation order, then P3
+		expected := []string{"High pri", "Mid pri", "Also mid", "Low pri"}
+		for i, want := range expected {
+			if ready.Issues[i].Title != want {
+				t.Fatalf("position %d: expected %q, got %q", i, want, ready.Issues[i].Title)
+			}
+		}
+	})
+}
+
+// --- Claim/unclaim tests ---
+
+func TestClaimAndUnclaim(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var created ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Claimable task"}, &created)
+
+		var claimed ait.Issue
+		runJSONCommand(t, a, []string{"claim", created.ID, "agent-1"}, &claimed)
+
+		if claimed.ClaimedBy == nil || *claimed.ClaimedBy != "agent-1" {
+			t.Fatalf("expected claimed_by=agent-1, got %v", claimed.ClaimedBy)
+		}
+		if claimed.ClaimedAt == nil {
+			t.Fatalf("expected claimed_at to be set")
+		}
+
+		var unclaimed ait.Issue
+		runJSONCommand(t, a, []string{"unclaim", created.ID}, &unclaimed)
+
+		if unclaimed.ClaimedBy != nil {
+			t.Fatalf("expected claimed_by=nil after unclaim, got %v", unclaimed.ClaimedBy)
+		}
+		if unclaimed.ClaimedAt != nil {
+			t.Fatalf("expected claimed_at=nil after unclaim, got %v", unclaimed.ClaimedAt)
+		}
+	})
+}
+
+func TestClaimAlreadyClaimedReturnsConflict(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var created ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Contested task"}, &created)
+
+		runJSONCommand[ait.Issue](t, a, []string{"claim", created.ID, "agent-1"}, nil)
+
+		err := runExpectError(t, a, []string{"claim", created.ID, "agent-2"})
+		if err == nil {
+			t.Fatal("expected conflict error")
+		}
+		if !strings.Contains(err.Error(), "already claimed") {
+			t.Fatalf("expected 'already claimed' message, got: %s", err.Error())
+		}
+	})
+}
+
+func TestClaimVisibleInShow(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var created ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Visible claim"}, &created)
+
+		runJSONCommand[ait.Issue](t, a, []string{"claim", created.ID, "claude"}, nil)
+
+		var shown ait.ShowResponse
+		runJSONCommand(t, a, []string{"show", created.ID}, &shown)
+
+		if shown.Issue.ClaimedBy == nil || *shown.Issue.ClaimedBy != "claude" {
+			t.Fatalf("expected show to reflect claim, got %v", shown.Issue.ClaimedBy)
+		}
+	})
+}
+
+func TestMigrationsAreIdempotent(t *testing.T) {
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "idempotent.db")
+
+	ctx := context.Background()
+
+	// Open twice — second open should be a no-op for migrations.
+	app1, err := ait.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("first Open failed: %v", err)
+	}
+	runJSONCommand[ait.Issue](t, app1, []string{"create", "--title", "Survives reopen"}, nil)
+	app1.Close()
+
+	app2, err := ait.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("second Open failed: %v", err)
+	}
+	defer app2.Close()
+
+	var listed struct {
+		Issues []ait.IssueRef `json:"issues"`
+	}
+	runJSONCommand(t, app2, []string{"list"}, &listed)
+	if len(listed.Issues) != 1 {
+		t.Fatalf("expected 1 issue after reopen, got %d", len(listed.Issues))
+	}
+	if listed.Issues[0].Title != "Survives reopen" {
+		t.Fatalf("unexpected title: %s", listed.Issues[0].Title)
+	}
+}

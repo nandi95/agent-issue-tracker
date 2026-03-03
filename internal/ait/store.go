@@ -72,16 +72,8 @@ func (a *App) Close() error {
 
 func issueSelectColumns(alias string) string {
 	return fmt.Sprintf(
-		`%s.public_id, %s.type, %s.title, %s.description, %s.status, parent.public_id, %s.priority, %s.created_at, %s.updated_at, %s.closed_at`,
-		alias,
-		alias,
-		alias,
-		alias,
-		alias,
-		alias,
-		alias,
-		alias,
-		alias,
+		`%s.public_id, %s.type, %s.title, %s.description, %s.status, parent.public_id, %s.priority, %s.claimed_by, %s.claimed_at, %s.created_at, %s.updated_at, %s.closed_at`,
+		alias, alias, alias, alias, alias, alias, alias, alias, alias, alias, alias,
 	)
 }
 
@@ -299,7 +291,7 @@ func (a *App) readyIssues(ctx context.Context, typeFilter string) ([]Issue, erro
 		query += ` AND i.type = ?`
 		params = append(params, typeFilter)
 	}
-	query += ` ORDER BY i.created_at ASC`
+	query += ` ORDER BY i.priority ASC, i.created_at ASC`
 	return a.queryIssues(ctx, query, params...)
 }
 
@@ -322,7 +314,7 @@ func (a *App) readyIssueRefs(ctx context.Context, typeFilter string) ([]IssueRef
 		query += ` AND i.type = ?`
 		params = append(params, typeFilter)
 	}
-	query += ` ORDER BY i.created_at ASC`
+	query += ` ORDER BY i.priority ASC, i.created_at ASC`
 	return a.queryIssueRefs(ctx, query, params...)
 }
 
@@ -433,54 +425,8 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 		}
 	}
 
-	statements := []string{
-		`CREATE TABLE IF NOT EXISTS issues (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			legacy_id TEXT UNIQUE,
-			public_id TEXT UNIQUE,
-			type TEXT NOT NULL CHECK (type IN ('task', 'epic')),
-			title TEXT NOT NULL,
-			description TEXT NOT NULL DEFAULT '',
-			status TEXT NOT NULL CHECK (status IN ('open', 'in_progress', 'closed', 'cancelled')),
-			parent_id INTEGER NULL,
-			priority TEXT NOT NULL DEFAULT 'P2' CHECK (priority IN ('P0', 'P1', 'P2', 'P3', 'P4')),
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL,
-			closed_at TEXT NULL,
-			FOREIGN KEY (parent_id) REFERENCES issues(id)
-		);`,
-		`CREATE TABLE IF NOT EXISTS issue_dependencies (
-			blocked_id INTEGER NOT NULL,
-			blocker_id INTEGER NOT NULL,
-			created_at TEXT NOT NULL,
-			PRIMARY KEY (blocked_id, blocker_id),
-			FOREIGN KEY (blocked_id) REFERENCES issues(id) ON DELETE CASCADE,
-			FOREIGN KEY (blocker_id) REFERENCES issues(id) ON DELETE CASCADE
-		);`,
-		`CREATE TABLE IF NOT EXISTS issue_notes (
-			id TEXT PRIMARY KEY,
-			issue_id INTEGER NOT NULL,
-			body TEXT NOT NULL,
-			created_at TEXT NOT NULL,
-			FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE
-		);`,
-		`CREATE TABLE IF NOT EXISTS project_config (
-			id INTEGER PRIMARY KEY CHECK (id = 1),
-			prefix TEXT NOT NULL,
-			updated_at TEXT NOT NULL
-		);`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_public_id ON issues(public_id);`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_legacy_id ON issues(legacy_id) WHERE legacy_id IS NOT NULL;`,
-		`CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);`,
-		`CREATE INDEX IF NOT EXISTS idx_issues_parent_id ON issues(parent_id);`,
-		`CREATE INDEX IF NOT EXISTS idx_issue_dependencies_blocker_id ON issue_dependencies(blocker_id);`,
-		`CREATE INDEX IF NOT EXISTS idx_issue_notes_issue_id ON issue_notes(issue_id);`,
-	}
-
-	for _, stmt := range statements {
-		if _, err := db.ExecContext(ctx, stmt); err != nil {
-			return err
-		}
+	if err := runMigrations(ctx, db); err != nil {
+		return err
 	}
 
 	prefix, err := ensureProjectPrefix(ctx, db)

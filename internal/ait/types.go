@@ -36,6 +36,8 @@ type Issue struct {
 	Status      string  `json:"status"`
 	ParentID    *string `json:"parent_id"`
 	Priority    string  `json:"priority"`
+	ClaimedBy   *string `json:"claimed_by"`
+	ClaimedAt   *string `json:"claimed_at"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
 	ClosedAt    *string `json:"closed_at"`
@@ -190,8 +192,7 @@ func ExitWithError(err *CLIError) {
 
 func scanIssue(scanner interface{ Scan(dest ...any) error }) (Issue, error) {
 	var iss Issue
-	var parentID sql.NullString
-	var closedAt sql.NullString
+	var parentID, claimedBy, claimedAt, closedAt sql.NullString
 
 	err := scanner.Scan(
 		&iss.ID,
@@ -201,6 +202,8 @@ func scanIssue(scanner interface{ Scan(dest ...any) error }) (Issue, error) {
 		&iss.Status,
 		&parentID,
 		&iss.Priority,
+		&claimedBy,
+		&claimedAt,
 		&iss.CreatedAt,
 		&iss.UpdatedAt,
 		&closedAt,
@@ -210,6 +213,12 @@ func scanIssue(scanner interface{ Scan(dest ...any) error }) (Issue, error) {
 	}
 	if parentID.Valid {
 		iss.ParentID = &parentID.String
+	}
+	if claimedBy.Valid {
+		iss.ClaimedBy = &claimedBy.String
+	}
+	if claimedAt.Valid {
+		iss.ClaimedAt = &claimedAt.String
 	}
 	if closedAt.Valid {
 		iss.ClosedAt = &closedAt.String
