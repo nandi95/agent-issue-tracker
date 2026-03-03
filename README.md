@@ -1,10 +1,10 @@
 # Agent Issue Tracker
 
-`ait` is a small, local-first issue tracker built primarily for coding agents.
+`ait` is a small, local-first issue tracker built primarily for coding agents.  Heavily inspired by Steve Yegge's [beads](https://github.com/steveyegge/beads) project.  Just pruned down to the essentials I need.
 
 It is intended to help an agent turn a plan into structured work, track dependencies, preserve notes between sessions, and quickly answer a practical question: what should I do next?
 
-Repository: `https://github.com/ohnotnow/ait`
+Repository: `https://github.com/ohnotnow/agent-issue-tracker`
 
 ## Status
 
@@ -174,6 +174,22 @@ That database stores:
 - project-level configuration such as the current public ID prefix
 
 This keeps issue state close to the codebase it belongs to and makes it easy to inspect or back up.
+
+## Claude Code Skill
+
+The repository includes a `SKILL.md` file — a [Claude Code skill](https://docs.anthropic.com/en/docs/claude-code) that teaches Claude how to use `ait` effectively.
+
+To use it, copy `SKILL.md` into your Claude skills directory:
+
+```bash
+# For a single project (from the project root):
+mkdir -p .claude/skills && cp SKILL.md .claude/skills/ait/SKILL.md
+
+# Or globally (available in all projects):
+mkdir -p ~/.claude/skills/ait && cp SKILL.md ~/.claude/skills/ait/SKILL.md
+```
+
+Once installed, Claude Code will know the full command set, workflow patterns, and best practices for working with `ait`.
 
 ## Development
 
