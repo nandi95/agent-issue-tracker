@@ -240,10 +240,15 @@ func (a *App) runList(ctx context.Context, args []string) error {
 	issueType := fs.String("type", "", "")
 	priority := fs.String("priority", "", "")
 	long := fs.Bool("long", false, "")
+	human := fs.Bool("human", false, "")
+	tree := fs.Bool("tree", false, "")
 	fs.SetOutput(io.Discard)
 
 	if err := fs.Parse(args); err != nil {
 		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
+	}
+	if *human && *tree {
+		return &CLIError{Code: "usage", Message: "--human and --tree are mutually exclusive", ExitCode: 64}
 	}
 	if *status != "" {
 		if err := ValidateStatus(*status); err != nil {
@@ -292,6 +297,23 @@ func (a *App) runList(ctx context.Context, args []string) error {
 	where := ""
 	if len(clauses) > 0 {
 		where = " WHERE " + strings.Join(clauses, " AND ")
+	}
+
+	if *human || *tree {
+		query := fmt.Sprintf(
+			`SELECT %s FROM issues i LEFT JOIN issues parent ON parent.id = i.parent_id%s ORDER BY i.created_at ASC`,
+			issueSelectColumns("i"), where,
+		)
+		items, err := a.queryIssues(ctx, query, params...)
+		if err != nil {
+			return err
+		}
+		if *human {
+			fmt.Print(FormatHumanList(items))
+		} else {
+			fmt.Print(FormatTreeList(items))
+		}
+		return nil
 	}
 
 	if *long {
@@ -812,6 +834,7 @@ Commands:
   show    <id>                               Show issue details and notes
   list    [--type] [--status] [--priority]   List issues
           [--parent] [--all] [--long]
+          [--human] [--tree]
   search  <query>                            Search issues by text
   status                                     Show project summary counts
   ready   [--type] [--long]                  List unblocked issues

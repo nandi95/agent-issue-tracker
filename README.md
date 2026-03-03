@@ -41,7 +41,7 @@ Implemented commands:
 - `init`
 - `create`
 - `show`
-- `list` (`--type`, `--status`, `--priority`, `--parent`, `--all`, `--long`)
+- `list` (`--type`, `--status`, `--priority`, `--parent`, `--all`, `--long`, `--human`, `--tree`)
 - `status`
 - `search`
 - `update`
@@ -62,9 +62,19 @@ By default, `list` and `ready` return a slim view with only the fields an agent 
 
 Pass `--long` to get the full issue record including `description`, `parent_id`, timestamps, and `closed_at`.
 
+For human-friendly output, two display modes are available:
+
+- `--human` — compact tabular view with epics and children grouped, child IDs shown as short suffixes (`.1`, `.2`)
+- `--tree` — parent-child hierarchy using tree connectors (`├──`, `└──`), full IDs on every line
+
+These are mutually exclusive and can be combined with the usual filters (`--type`, `--status`, `--priority`).
+
 ```bash
-ait list                  # slim (5 fields per issue)
-ait list --long           # full record
+ait list                  # slim JSON (5 fields per issue)
+ait list --long           # full JSON record
+ait list --human          # compact tabular view
+ait list --tree           # tree hierarchy view
+ait list --human --priority P1  # filtered tabular view
 ait ready --type task     # slim, tasks only (excludes epics)
 ait ready --long          # full record, all types
 ```

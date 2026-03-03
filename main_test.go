@@ -722,6 +722,346 @@ func TestHelpShowsUsage(t *testing.T) {
 	})
 }
 
+// --- Rekey tests (ait-2KY5X.6) ---
+
+func TestRekeyChangesAllRootIDs(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "alpha"}, nil)
+
+		var i1, i2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "First"}, &i1)
+		runJSONCommand(t, a, []string{"create", "--title", "Second"}, &i2)
+
+		if !strings.HasPrefix(i1.ID, "alpha-") || !strings.HasPrefix(i2.ID, "alpha-") {
+			t.Fatalf("expected alpha- prefix, got %s and %s", i1.ID, i2.ID)
+		}
+
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "beta"}, nil)
+
+		var listed struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list"}, &listed)
+
+		if len(listed.Issues) != 2 {
+			t.Fatalf("expected 2 issues, got %d", len(listed.Issues))
+		}
+		for _, issue := range listed.Issues {
+			if !strings.HasPrefix(issue.ID, "beta-") {
+				t.Fatalf("expected beta- prefix after rekey, got %s", issue.ID)
+			}
+		}
+	})
+}
+
+func TestRekeyPreservesHierarchy(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "alpha"}, nil)
+
+		var epic ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Epic", "--type", "epic"}, &epic)
+		var child ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Child", "--parent", epic.ID}, &child)
+		var grandchild ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Grandchild", "--parent", child.ID}, &grandchild)
+
+		// Verify original hierarchy
+		if child.ID != epic.ID+".1" {
+			t.Fatalf("expected child %s.1, got %s", epic.ID, child.ID)
+		}
+		if grandchild.ID != child.ID+".1" {
+			t.Fatalf("expected grandchild %s.1, got %s", child.ID, grandchild.ID)
+		}
+
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "beta"}, nil)
+
+		var listed struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list"}, &listed)
+
+		// Find the epic (no dot in ID)
+		var newEpicID string
+		for _, issue := range listed.Issues {
+			if !strings.Contains(issue.ID, ".") {
+				newEpicID = issue.ID
+				break
+			}
+		}
+		if newEpicID == "" || !strings.HasPrefix(newEpicID, "beta-") {
+			t.Fatalf("expected beta- root epic, got %q", newEpicID)
+		}
+
+		// Verify dotted suffixes are maintained
+		expectedChild := newEpicID + ".1"
+		expectedGrandchild := newEpicID + ".1.1"
+		found := map[string]bool{}
+		for _, issue := range listed.Issues {
+			found[issue.ID] = true
+		}
+		if !found[expectedChild] {
+			t.Fatalf("expected child %s in listed issues: %v", expectedChild, listed.Issues)
+		}
+		if !found[expectedGrandchild] {
+			t.Fatalf("expected grandchild %s in listed issues: %v", expectedGrandchild, listed.Issues)
+		}
+	})
+}
+
+func TestRekeyDependenciesSurvive(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "alpha"}, nil)
+
+		var i1, i2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Blocked"}, &i1)
+		runJSONCommand(t, a, []string{"create", "--title", "Blocker"}, &i2)
+		runJSONCommand[map[string]any](t, a, []string{"dep", "add", i1.ID, i2.ID}, nil)
+
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "beta"}, nil)
+
+		// Find the rekeyed IDs
+		var listed struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list"}, &listed)
+
+		var blockedID, blockerID string
+		for _, issue := range listed.Issues {
+			if issue.Title == "Blocked" {
+				blockedID = issue.ID
+			}
+			if issue.Title == "Blocker" {
+				blockerID = issue.ID
+			}
+		}
+
+		var depList struct {
+			IssueID  string         `json:"issue_id"`
+			Blockers []ait.IssueRef `json:"blockers"`
+		}
+		runJSONCommand(t, a, []string{"dep", "list", blockedID}, &depList)
+
+		if len(depList.Blockers) != 1 {
+			t.Fatalf("expected 1 blocker after rekey, got %d", len(depList.Blockers))
+		}
+		if depList.Blockers[0].ID != blockerID {
+			t.Fatalf("expected blocker %s, got %s", blockerID, depList.Blockers[0].ID)
+		}
+	})
+}
+
+func TestRekeyNotesSurvive(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "alpha"}, nil)
+
+		var created ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Has notes"}, &created)
+		runJSONCommand[ait.Note](t, a, []string{"note", "add", created.ID, "Important note"}, nil)
+
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "beta"}, nil)
+
+		// Find the rekeyed ID
+		var listed struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list"}, &listed)
+		if len(listed.Issues) != 1 {
+			t.Fatalf("expected 1 issue, got %d", len(listed.Issues))
+		}
+		newID := listed.Issues[0].ID
+
+		var noteList struct {
+			IssueID string     `json:"issue_id"`
+			Notes   []ait.Note `json:"notes"`
+		}
+		runJSONCommand(t, a, []string{"note", "list", newID}, &noteList)
+
+		if len(noteList.Notes) != 1 {
+			t.Fatalf("expected 1 note after rekey, got %d", len(noteList.Notes))
+		}
+		if noteList.Notes[0].Body != "Important note" {
+			t.Fatalf("expected note body 'Important note', got %q", noteList.Notes[0].Body)
+		}
+	})
+}
+
+func TestRekeyDouble(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "alpha"}, nil)
+
+		var i1 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Survives double rekey"}, &i1)
+		if !strings.HasPrefix(i1.ID, "alpha-") {
+			t.Fatalf("expected alpha- prefix, got %s", i1.ID)
+		}
+
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "beta"}, nil)
+
+		var midList struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list"}, &midList)
+		if !strings.HasPrefix(midList.Issues[0].ID, "beta-") {
+			t.Fatalf("expected beta- prefix after first rekey, got %s", midList.Issues[0].ID)
+		}
+
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "gamma"}, nil)
+
+		var finalList struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list"}, &finalList)
+		if len(finalList.Issues) != 1 {
+			t.Fatalf("expected 1 issue, got %d", len(finalList.Issues))
+		}
+		if !strings.HasPrefix(finalList.Issues[0].ID, "gamma-") {
+			t.Fatalf("expected gamma- prefix after second rekey, got %s", finalList.Issues[0].ID)
+		}
+	})
+}
+
+func TestRekeyIdempotent(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "foo"}, nil)
+
+		var i1, i2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "First"}, &i1)
+		runJSONCommand(t, a, []string{"create", "--title", "Second"}, &i2)
+
+		// Capture IDs before second init
+		var before struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list"}, &before)
+
+		beforeIDs := map[string]bool{}
+		for _, issue := range before.Issues {
+			beforeIDs[issue.ID] = true
+		}
+
+		// Run init with same prefix again
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "foo"}, nil)
+
+		var after struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list"}, &after)
+
+		if len(after.Issues) != len(before.Issues) {
+			t.Fatalf("expected same number of issues, got %d vs %d", len(before.Issues), len(after.Issues))
+		}
+		for _, issue := range after.Issues {
+			if !beforeIDs[issue.ID] {
+				t.Fatalf("ID changed after idempotent rekey: %s not in original set", issue.ID)
+			}
+		}
+	})
+}
+
+func TestListHuman(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "test"}, nil)
+
+		var epic ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Stabilize v1", "--type", "epic", "--priority", "P1"}, &epic)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Add schema versioning", "--parent", epic.ID, "--priority", "P1"}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Improve prioritization", "--parent", epic.ID, "--priority", "P2"}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Standalone task"}, nil)
+
+		output := captureStdout(t, func() {
+			if err := a.Run(ctx, []string{"list", "--human"}); err != nil {
+				t.Fatalf("list --human failed: %v", err)
+			}
+		})
+
+		// Should contain the epic ID
+		if !strings.Contains(output, epic.ID) {
+			t.Fatalf("expected epic ID %s in output:\n%s", epic.ID, output)
+		}
+		// Should contain child suffixes
+		if !strings.Contains(output, ".1") {
+			t.Fatalf("expected child suffix .1 in output:\n%s", output)
+		}
+		if !strings.Contains(output, ".2") {
+			t.Fatalf("expected child suffix .2 in output:\n%s", output)
+		}
+		// Should contain titles
+		if !strings.Contains(output, "Stabilize v1") {
+			t.Fatalf("expected epic title in output:\n%s", output)
+		}
+		if !strings.Contains(output, "Add schema versioning") {
+			t.Fatalf("expected child title in output:\n%s", output)
+		}
+		// Should contain the type label for epics
+		if !strings.Contains(output, "epic") {
+			t.Fatalf("expected 'epic' type label in output:\n%s", output)
+		}
+		// Should not be JSON
+		if strings.HasPrefix(strings.TrimSpace(output), "{") {
+			t.Fatalf("expected non-JSON output, got:\n%s", output)
+		}
+	})
+}
+
+func TestListTree(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[map[string]string](t, a, []string{"init", "--prefix", "tree"}, nil)
+
+		var epic ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Epic One", "--type", "epic", "--priority", "P1"}, &epic)
+		var child1 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Child One", "--parent", epic.ID}, &child1)
+		var child2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Child Two", "--parent", epic.ID}, &child2)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Solo task"}, nil)
+
+		output := captureStdout(t, func() {
+			if err := a.Run(ctx, []string{"list", "--tree"}); err != nil {
+				t.Fatalf("list --tree failed: %v", err)
+			}
+		})
+
+		// Should contain tree connectors
+		if !strings.Contains(output, "├── ") {
+			t.Fatalf("expected ├── connector in output:\n%s", output)
+		}
+		if !strings.Contains(output, "└── ") {
+			t.Fatalf("expected └── connector in output:\n%s", output)
+		}
+		// Should contain full child IDs
+		if !strings.Contains(output, child1.ID) {
+			t.Fatalf("expected child ID %s in output:\n%s", child1.ID, output)
+		}
+		if !strings.Contains(output, child2.ID) {
+			t.Fatalf("expected child ID %s in output:\n%s", child2.ID, output)
+		}
+		// Should contain metadata in parentheses
+		if !strings.Contains(output, "(epic, P1, open)") {
+			t.Fatalf("expected '(epic, P1, open)' in output:\n%s", output)
+		}
+		// Children should have (priority, status) format
+		if !strings.Contains(output, "(P2, open)") {
+			t.Fatalf("expected '(P2, open)' in output:\n%s", output)
+		}
+		// Should not be JSON
+		if strings.HasPrefix(strings.TrimSpace(output), "{") {
+			t.Fatalf("expected non-JSON output, got:\n%s", output)
+		}
+	})
+}
+
+func TestListHumanAndTreeMutuallyExclusive(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		err := runExpectError(t, a, []string{"list", "--human", "--tree"})
+		if err == nil {
+			t.Fatal("expected error for --human --tree")
+		}
+		if !strings.Contains(err.Error(), "mutually exclusive") {
+			t.Fatalf("unexpected error: %s", err.Error())
+		}
+	})
+}
+
 func TestCreateInvalidType(t *testing.T) {
 	testApp(t, func(ctx context.Context, a *ait.App) {
 		err := runExpectError(t, a, []string{"create", "--title", "Bad type", "--type", "story"})
