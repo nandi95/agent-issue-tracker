@@ -2,11 +2,16 @@ package ait
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"strings"
 )
+
+func isHelpRequested(err error) bool {
+	return errors.Is(err, flag.ErrHelp)
+}
 
 func (a *App) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
@@ -59,6 +64,10 @@ func (a *App) runInit(ctx context.Context, args []string) error {
 	fs.SetOutput(io.Discard)
 
 	if err := fs.Parse(args); err != nil {
+		if isHelpRequested(err) {
+			PrintHelp()
+			return nil
+		}
 		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
 	}
 
@@ -93,6 +102,10 @@ func (a *App) runCreate(ctx context.Context, args []string) error {
 	fs.SetOutput(io.Discard)
 
 	if err := fs.Parse(args); err != nil {
+		if isHelpRequested(err) {
+			PrintHelp()
+			return nil
+		}
 		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
 	}
 
@@ -245,6 +258,10 @@ func (a *App) runList(ctx context.Context, args []string) error {
 	fs.SetOutput(io.Discard)
 
 	if err := fs.Parse(args); err != nil {
+		if isHelpRequested(err) {
+			PrintHelp()
+			return nil
+		}
 		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
 	}
 	if *human && *tree {
@@ -579,6 +596,10 @@ func (a *App) runReady(ctx context.Context, args []string) error {
 	fs.SetOutput(io.Discard)
 
 	if err := fs.Parse(args); err != nil {
+		if isHelpRequested(err) {
+			PrintHelp()
+			return nil
+		}
 		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
 	}
 	if *issueType != "" {
@@ -825,7 +846,7 @@ func (a *App) runNoteList(ctx context.Context, args []string) error {
 	return PrintJSON(map[string]any{"issue_id": issue.ID, "notes": items})
 }
 
-const helpText = `Usage: agent-issue-tracker [--db <path>] <command> [options]
+const helpText = `Usage: ait [--db <path>] <command> [options]
 
 Commands:
   init    --prefix <value>                   Set project prefix for issue IDs
