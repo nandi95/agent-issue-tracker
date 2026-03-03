@@ -18,6 +18,8 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	}
 
 	switch args[0] {
+	case "init":
+		return a.runInit(ctx, args[1:])
 	case "create":
 		return a.runCreate(ctx, args[1:])
 	case "show":
@@ -49,6 +51,36 @@ func (a *App) Run(ctx context.Context, args []string) error {
 			ExitCode: 64,
 		}
 	}
+}
+
+func (a *App) runInit(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	prefix := fs.String("prefix", "", "")
+	fs.SetOutput(io.Discard)
+
+	if err := fs.Parse(args); err != nil {
+		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
+	}
+
+	var (
+		resolved string
+		err      error
+	)
+
+	if strings.TrimSpace(*prefix) == "" {
+		resolved, err = a.ensureProjectPrefix(ctx)
+	} else {
+		resolved, err = a.setProjectPrefix(ctx, *prefix)
+	}
+	if err != nil {
+		return err
+	}
+
+	if err := syncPublicIDs(ctx, a.db, resolved, strings.TrimSpace(*prefix) != ""); err != nil {
+		return err
+	}
+
+	return PrintJSON(map[string]any{"prefix": resolved})
 }
 
 func (a *App) runCreate(ctx context.Context, args []string) error {
@@ -91,6 +123,11 @@ func (a *App) runCreate(ctx context.Context, args []string) error {
 		parentInternalID = resolvedParentID
 	}
 
+	prefix, err := a.ensureProjectPrefix(ctx)
+	if err != nil {
+		return err
+	}
+
 	tx, err := a.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -120,9 +157,23 @@ func (a *App) runCreate(ctx context.Context, args []string) error {
 		return err
 	}
 
-	publicID, err := PublicIDFromInternalID(internalID)
-	if err != nil {
-		return err
+	var publicID string
+	if parentInternalID == nil {
+		publicID, err = RootPublicID(prefix, internalID)
+		if err != nil {
+			return err
+		}
+	} else {
+		var siblingCount int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM issues WHERE parent_id = ?`, parentInternalID).Scan(&siblingCount); err != nil {
+			return err
+		}
+
+		parentIssue, err := a.fetchIssueByInternalID(ctx, parentInternalID.(int64))
+		if err != nil {
+			return err
+		}
+		publicID = fmt.Sprintf("%s.%d", parentIssue.ID, siblingCount)
 	}
 
 	if _, err := tx.ExecContext(ctx, `UPDATE issues SET public_id = ? WHERE id = ?`, publicID, internalID); err != nil {
@@ -362,9 +413,7 @@ func (a *App) runUpdate(ctx context.Context, args []string) error {
 		if current.Type == "epic" {
 			return &CLIError{Code: "validation", Message: "epics cannot have a parent", ExitCode: 65}
 		}
-		if err := a.validateParent(ctx, *parentID); err != nil {
-			return err
-		}
+		return &CLIError{Code: "validation", Message: "changing parent is not supported once hierarchical ids are enabled", ExitCode: 65}
 	}
 
 	var sets []string
@@ -387,14 +436,6 @@ func (a *App) runUpdate(ctx context.Context, args []string) error {
 		} else {
 			sets = append(sets, "closed_at = NULL")
 		}
-	}
-	if *parentID != "" {
-		sets = append(sets, "parent_id = ?")
-		parentInternalID, err := a.resolveIssueID(ctx, *parentID)
-		if err != nil {
-			return err
-		}
-		params = append(params, parentInternalID)
 	}
 	if *priority != "" {
 		sets = append(sets, "priority = ?")

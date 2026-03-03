@@ -83,22 +83,15 @@ func (a *App) resolveIssueID(ctx context.Context, key string) (int64, error) {
 		return 0, &CLIError{Code: "validation", Message: "issue id is required", ExitCode: 65}
 	}
 
-	var queryValue string
-	var row *sql.Row
-
-	if strings.HasPrefix(key, publicIDPrefix) {
-		canonical, err := CanonicalizePublicID(key)
-		if err != nil {
-			return 0, err
-		}
-		queryValue = canonical
-		row = a.db.QueryRowContext(ctx, `SELECT id FROM issues WHERE public_id = ?`, queryValue)
-	} else {
-		queryValue = key
-		row = a.db.QueryRowContext(ctx, `SELECT id FROM issues WHERE legacy_id = ?`, queryValue)
+	var internalID int64
+	row := a.db.QueryRowContext(ctx, `SELECT id FROM issues WHERE public_id = ?`, key)
+	if err := row.Scan(&internalID); err == nil {
+		return internalID, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return 0, err
 	}
 
-	var internalID int64
+	row = a.db.QueryRowContext(ctx, `SELECT id FROM issues WHERE legacy_id = ?`, key)
 	if err := row.Scan(&internalID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return 0, &CLIError{Code: "not_found", Message: fmt.Sprintf("issue %s not found", key), ExitCode: 66}
@@ -289,14 +282,8 @@ func (a *App) readyIssues(ctx context.Context) ([]Issue, error) {
 }
 
 func (a *App) validateParent(ctx context.Context, parentID string) error {
-	parent, err := a.fetchIssue(ctx, parentID)
-	if err != nil {
-		return err
-	}
-	if parent.Type != "epic" {
-		return &CLIError{Code: "validation", Message: "parent must be an epic", ExitCode: 65}
-	}
-	return nil
+	_, err := a.fetchIssue(ctx, parentID)
+	return err
 }
 
 func (a *App) hasDirectDependency(ctx context.Context, blockedID, blockerID int64) bool {
@@ -346,23 +333,9 @@ func (a *App) buildDependencyTree(ctx context.Context, ref IssueRef, seen map[st
 }
 
 func DatabasePath() (string, error) {
-	cwd, err := os.Getwd()
+	root, err := ProjectRoot()
 	if err != nil {
 		return "", err
-	}
-
-	root := cwd
-	current := cwd
-	for {
-		if _, err := os.Stat(filepath.Join(current, ".git")); err == nil {
-			root = current
-			break
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			break
-		}
-		current = parent
 	}
 
 	return filepath.Join(root, ".ait", "ait.db"), nil
@@ -410,6 +383,11 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			created_at TEXT NOT NULL,
 			FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE
 		);`,
+		`CREATE TABLE IF NOT EXISTS project_config (
+			id INTEGER PRIMARY KEY CHECK (id = 1),
+			prefix TEXT NOT NULL,
+			updated_at TEXT NOT NULL
+		);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_public_id ON issues(public_id);`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_issues_legacy_id ON issues(legacy_id) WHERE legacy_id IS NOT NULL;`,
 		`CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);`,
@@ -423,7 +401,13 @@ func ensureSchema(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 	}
-	return nil
+
+	prefix, err := ensureProjectPrefix(ctx, db)
+	if err != nil {
+		return err
+	}
+
+	return syncPublicIDs(ctx, db, prefix, false)
 }
 
 func dependencyAlreadyExists(err error) bool {
@@ -584,17 +568,6 @@ func migrateLegacySchema(ctx context.Context, db *sql.DB) error {
 			return err
 		}
 
-		publicID, err := PublicIDFromInternalID(internalID)
-		if err != nil {
-			rows.Close()
-			return err
-		}
-
-		if _, err := tx.ExecContext(ctx, `UPDATE issues_v2 SET public_id = ? WHERE id = ?`, publicID, internalID); err != nil {
-			rows.Close()
-			return err
-		}
-
 		legacyToInternal[legacyID] = internalID
 		if parentID.Valid {
 			parentUpdates = append(parentUpdates, pendingParent{internalID: internalID, legacyID: parentID.String})
@@ -677,6 +650,91 @@ func migrateLegacySchema(ctx context.Context, db *sql.DB) error {
 
 	for _, stmt := range cleanupStatements {
 		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func syncPublicIDs(ctx context.Context, db *sql.DB, prefix string, forceRoot bool) error {
+	type issueNode struct {
+		id       int64
+		parentID sql.NullInt64
+		publicID sql.NullString
+	}
+
+	rows, err := db.QueryContext(
+		ctx,
+		`SELECT id, parent_id, public_id
+		 FROM issues
+		 ORDER BY created_at ASC, id ASC`,
+	)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	nodes := make(map[int64]issueNode)
+	children := make(map[int64][]int64)
+	roots := make([]int64, 0)
+
+	for rows.Next() {
+		var node issueNode
+		if err := rows.Scan(&node.id, &node.parentID, &node.publicID); err != nil {
+			return err
+		}
+		nodes[node.id] = node
+		if node.parentID.Valid {
+			children[node.parentID.Int64] = append(children[node.parentID.Int64], node.id)
+		} else {
+			roots = append(roots, node.id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	var assign func(issueID int64, expected string) error
+	assign = func(issueID int64, expected string) error {
+		node := nodes[issueID]
+		if !node.publicID.Valid || node.publicID.String != expected {
+			if _, err := tx.ExecContext(ctx, `UPDATE issues SET public_id = ? WHERE id = ?`, expected, issueID); err != nil {
+				return err
+			}
+			node.publicID = sql.NullString{String: expected, Valid: true}
+			nodes[issueID] = node
+		}
+
+		for idx, childID := range children[issueID] {
+			childPublicID := fmt.Sprintf("%s.%d", expected, idx+1)
+			if err := assign(childID, childPublicID); err != nil {
+				return err
+			}
+		}
+
+		return nil
+	}
+
+	for _, issueID := range roots {
+		node := nodes[issueID]
+		expected := ""
+		if !forceRoot && node.publicID.Valid && node.publicID.String != "" {
+			expected = node.publicID.String
+		} else {
+			expected, err = RootPublicID(prefix, issueID)
+			if err != nil {
+				return err
+			}
+		}
+
+		if err := assign(issueID, expected); err != nil {
 			return err
 		}
 	}

@@ -36,10 +36,12 @@ func TestStatusInitializesEmptyDatabase(t *testing.T) {
 
 func TestCreateAndShowIssue(t *testing.T) {
 	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[map[string]any](t, a, []string{"init", "--prefix", "demo"}, nil)
+
 		var created ait.Issue
 		runJSONCommand(t, a, []string{"create", "--title", "Bootstrap CLI", "--description", "Implement first version"}, &created)
 
-		if !strings.HasPrefix(created.ID, "ait-") {
+		if !strings.HasPrefix(created.ID, "demo-") {
 			t.Fatalf("expected public issue id, got %s", created.ID)
 		}
 		if created.Title != "Bootstrap CLI" {
@@ -60,6 +62,35 @@ func TestCreateAndShowIssue(t *testing.T) {
 		}
 		if len(shown.Notes) != 0 {
 			t.Fatalf("expected no notes, got %d", len(shown.Notes))
+		}
+	})
+}
+
+func TestInitSetsPrefixAndHierarchicalIDs(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var initPayload map[string]string
+		runJSONCommand(t, a, []string{"init", "--prefix", "deliveries"}, &initPayload)
+
+		if initPayload["prefix"] != "deliveries" {
+			t.Fatalf("expected prefix deliveries, got %q", initPayload["prefix"])
+		}
+
+		var epic ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Epic", "--type", "epic"}, &epic)
+		if !strings.HasPrefix(epic.ID, "deliveries-") {
+			t.Fatalf("expected deliveries root id, got %s", epic.ID)
+		}
+
+		var child ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Child", "--parent", epic.ID}, &child)
+		if child.ID != epic.ID+".1" {
+			t.Fatalf("expected first child id %s.1, got %s", epic.ID, child.ID)
+		}
+
+		var grandchild ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Grandchild", "--parent", child.ID}, &grandchild)
+		if grandchild.ID != child.ID+".1" {
+			t.Fatalf("expected first grandchild id %s.1, got %s", child.ID, grandchild.ID)
 		}
 	})
 }
@@ -134,11 +165,11 @@ func TestOpenMigratesLegacyIDsToPublicKeys(t *testing.T) {
 	var shown ait.ShowResponse
 	runJSONCommand(t, app, []string{"show", "legacy-task"}, &shown)
 
-	if !strings.HasPrefix(shown.Issue.ID, "ait-") {
-		t.Fatalf("expected migrated public issue id, got %s", shown.Issue.ID)
-	}
-	if shown.Issue.ParentID == nil || !strings.HasPrefix(*shown.Issue.ParentID, "ait-") {
+	if shown.Issue.ParentID == nil {
 		t.Fatalf("expected migrated parent public id, got %+v", shown.Issue.ParentID)
+	}
+	if !strings.HasPrefix(shown.Issue.ID, *shown.Issue.ParentID+".") {
+		t.Fatalf("expected migrated child id to be hierarchical under %s, got %s", *shown.Issue.ParentID, shown.Issue.ID)
 	}
 	if len(shown.Notes) != 1 || shown.Notes[0].Body != "Migrated note" {
 		t.Fatalf("expected migrated note, got %+v", shown.Notes)
