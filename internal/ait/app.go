@@ -39,7 +39,7 @@ func (a *App) Run(ctx context.Context, args []string) error {
 	case "cancel":
 		return a.runStatusChange(ctx, args[1:], StatusCancelled)
 	case "ready":
-		return a.runReady(ctx)
+		return a.runReady(ctx, args[1:])
 	case "dep":
 		return a.runDependency(ctx, args[1:])
 	case "note":
@@ -239,6 +239,7 @@ func (a *App) runList(ctx context.Context, args []string) error {
 	status := fs.String("status", "", "")
 	issueType := fs.String("type", "", "")
 	priority := fs.String("priority", "", "")
+	long := fs.Bool("long", false, "")
 	fs.SetOutput(io.Discard)
 
 	if err := fs.Parse(args); err != nil {
@@ -260,12 +261,6 @@ func (a *App) runList(ctx context.Context, args []string) error {
 		}
 	}
 
-	query := fmt.Sprintf(
-		`SELECT %s
-		 FROM issues i
-		 LEFT JOIN issues parent ON parent.id = i.parent_id`,
-		issueSelectColumns("i"),
-	)
 	var clauses []string
 	var params []any
 
@@ -293,16 +288,32 @@ func (a *App) runList(ctx context.Context, args []string) error {
 		clauses = append(clauses, "i.priority = ?")
 		params = append(params, *priority)
 	}
-	if len(clauses) > 0 {
-		query += " WHERE " + strings.Join(clauses, " AND ")
-	}
-	query += " ORDER BY i.created_at ASC"
 
-	items, err := a.queryIssues(ctx, query, params...)
+	where := ""
+	if len(clauses) > 0 {
+		where = " WHERE " + strings.Join(clauses, " AND ")
+	}
+
+	if *long {
+		query := fmt.Sprintf(
+			`SELECT %s FROM issues i LEFT JOIN issues parent ON parent.id = i.parent_id%s ORDER BY i.created_at ASC`,
+			issueSelectColumns("i"), where,
+		)
+		items, err := a.queryIssues(ctx, query, params...)
+		if err != nil {
+			return err
+		}
+		return PrintJSON(map[string]any{"issues": items})
+	}
+
+	query := fmt.Sprintf(
+		`SELECT %s FROM issues i%s ORDER BY i.created_at ASC`,
+		issueRefSelectColumns("i"), where,
+	)
+	items, err := a.queryIssueRefs(ctx, query, params...)
 	if err != nil {
 		return err
 	}
-
 	return PrintJSON(map[string]any{"issues": items})
 }
 
@@ -327,7 +338,7 @@ func (a *App) runStatus(ctx context.Context) error {
 		return err
 	}
 
-	readyItems, err := a.readyIssues(ctx)
+	readyItems, err := a.readyIssueRefs(ctx, "")
 	if err != nil {
 		return err
 	}
@@ -539,8 +550,30 @@ func (a *App) runReopen(ctx context.Context, args []string) error {
 	return PrintJSON(updated)
 }
 
-func (a *App) runReady(ctx context.Context) error {
-	items, err := a.readyIssues(ctx)
+func (a *App) runReady(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("ready", flag.ContinueOnError)
+	long := fs.Bool("long", false, "")
+	issueType := fs.String("type", "", "")
+	fs.SetOutput(io.Discard)
+
+	if err := fs.Parse(args); err != nil {
+		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
+	}
+	if *issueType != "" {
+		if err := ValidateIssueType(*issueType); err != nil {
+			return err
+		}
+	}
+
+	if *long {
+		items, err := a.readyIssues(ctx, *issueType)
+		if err != nil {
+			return err
+		}
+		return PrintJSON(map[string]any{"issues": items})
+	}
+
+	items, err := a.readyIssueRefs(ctx, *issueType)
 	if err != nil {
 		return err
 	}
@@ -582,14 +615,15 @@ func (a *App) runDepAdd(ctx context.Context, args []string) error {
 		return err
 	}
 
-	if blockedID == blockerID {
-		return &CLIError{Code: "validation", Message: "an issue cannot depend on itself", ExitCode: 65}
-	}
 	if blockedInternalID == blockerInternalID {
 		return &CLIError{Code: "validation", Message: "an issue cannot depend on itself", ExitCode: 65}
 	}
-	if a.hasDirectDependency(ctx, blockerInternalID, blockedInternalID) {
-		return &CLIError{Code: "validation", Message: "direct reciprocal dependencies are not allowed", ExitCode: 65}
+	wouldCycle, err := a.isReachable(ctx, blockerInternalID, blockedInternalID)
+	if err != nil {
+		return err
+	}
+	if wouldCycle {
+		return &CLIError{Code: "validation", Message: "adding this dependency would create a cycle", ExitCode: 65}
 	}
 
 	_, err = a.db.ExecContext(

@@ -176,7 +176,7 @@ func TestOpenMigratesLegacyIDsToPublicKeys(t *testing.T) {
 	}
 
 	var listed struct {
-		Issues []ait.Issue `json:"issues"`
+		Issues []ait.IssueRef `json:"issues"`
 	}
 	runJSONCommand(t, app, []string{"list"}, &listed)
 	if len(listed.Issues) != 2 {
@@ -195,7 +195,7 @@ func TestReadyExcludesBlockedIssues(t *testing.T) {
 		runJSONCommand[map[string]any](t, a, []string{"dep", "add", blocked.ID, blocker.ID}, nil)
 
 		var ready struct {
-			Issues []ait.Issue `json:"issues"`
+			Issues []ait.IssueRef `json:"issues"`
 		}
 		runJSONCommand(t, a, []string{"ready"}, &ready)
 
@@ -325,6 +325,15 @@ func runJSONCommand[T any](t *testing.T, a *ait.App, args []string, target *T) {
 	}
 }
 
+func runExpectError(t *testing.T, a *ait.App, args []string) error {
+	t.Helper()
+	var runErr error
+	captureStdout(t, func() {
+		runErr = a.Run(context.Background(), args)
+	})
+	return runErr
+}
+
 func captureStdout(t *testing.T, fn func()) string {
 	t.Helper()
 
@@ -349,4 +358,392 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("read stdout failed: %v", err)
 	}
 	return string(bytes)
+}
+
+// --- Step 1: Output contract tests ---
+
+func TestListReturnsIssueRefsByDefault(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Task A"}, nil)
+
+		var result struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list"}, &result)
+
+		if len(result.Issues) != 1 {
+			t.Fatalf("expected 1 issue, got %d", len(result.Issues))
+		}
+		if result.Issues[0].Title != "Task A" {
+			t.Fatalf("unexpected title: %s", result.Issues[0].Title)
+		}
+
+		// Verify IssueRef shape: decode raw JSON and check no extra fields
+		raw := captureStdout(t, func() {
+			if err := a.Run(ctx, []string{"list"}); err != nil {
+				t.Fatal(err)
+			}
+		})
+		var rawResult map[string][]map[string]any
+		if err := json.Unmarshal([]byte(raw), &rawResult); err != nil {
+			t.Fatal(err)
+		}
+		issue := rawResult["issues"][0]
+		if _, ok := issue["description"]; ok {
+			t.Fatal("default list should not include description field")
+		}
+		if _, ok := issue["created_at"]; ok {
+			t.Fatal("default list should not include created_at field")
+		}
+	})
+}
+
+func TestListLongReturnsFullIssues(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Task A", "--description", "Details"}, nil)
+
+		var result struct {
+			Issues []ait.Issue `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list", "--long"}, &result)
+
+		if len(result.Issues) != 1 {
+			t.Fatalf("expected 1 issue, got %d", len(result.Issues))
+		}
+		if result.Issues[0].Description != "Details" {
+			t.Fatalf("expected description in --long output, got %q", result.Issues[0].Description)
+		}
+	})
+}
+
+func TestReadyReturnsIssueRefsByDefault(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Ready task"}, nil)
+
+		raw := captureStdout(t, func() {
+			if err := a.Run(ctx, []string{"ready"}); err != nil {
+				t.Fatal(err)
+			}
+		})
+		var rawResult map[string][]map[string]any
+		if err := json.Unmarshal([]byte(raw), &rawResult); err != nil {
+			t.Fatal(err)
+		}
+		issue := rawResult["issues"][0]
+		if _, ok := issue["description"]; ok {
+			t.Fatal("default ready should not include description field")
+		}
+	})
+}
+
+func TestReadyLongReturnsFullIssues(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Task", "--description", "Full"}, nil)
+
+		var result struct {
+			Issues []ait.Issue `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"ready", "--long"}, &result)
+
+		if len(result.Issues) != 1 {
+			t.Fatalf("expected 1 issue, got %d", len(result.Issues))
+		}
+		if result.Issues[0].Description != "Full" {
+			t.Fatalf("expected description in --long output, got %q", result.Issues[0].Description)
+		}
+	})
+}
+
+// --- Step 2: Type filter ---
+
+func TestReadyFilterByType(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "My Epic", "--type", "epic"}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "My Task", "--type", "task"}, nil)
+
+		var tasksOnly struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"ready", "--type", "task"}, &tasksOnly)
+
+		if len(tasksOnly.Issues) != 1 {
+			t.Fatalf("expected 1 task, got %d", len(tasksOnly.Issues))
+		}
+		if tasksOnly.Issues[0].Type != "task" {
+			t.Fatalf("expected type task, got %s", tasksOnly.Issues[0].Type)
+		}
+
+		var epicsOnly struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"ready", "--type", "epic"}, &epicsOnly)
+
+		if len(epicsOnly.Issues) != 1 {
+			t.Fatalf("expected 1 epic, got %d", len(epicsOnly.Issues))
+		}
+	})
+}
+
+// --- Step 3: Dependency tests ---
+
+func TestDepAddAndList(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var a1, a2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Issue A"}, &a1)
+		runJSONCommand(t, a, []string{"create", "--title", "Issue B"}, &a2)
+
+		var depList struct {
+			IssueID  string        `json:"issue_id"`
+			Blockers []ait.IssueRef `json:"blockers"`
+			Blocks   []ait.IssueRef `json:"blocks"`
+		}
+		runJSONCommand(t, a, []string{"dep", "add", a1.ID, a2.ID}, &depList)
+
+		if len(depList.Blockers) != 1 {
+			t.Fatalf("expected 1 blocker, got %d", len(depList.Blockers))
+		}
+		if depList.Blockers[0].ID != a2.ID {
+			t.Fatalf("expected blocker %s, got %s", a2.ID, depList.Blockers[0].ID)
+		}
+	})
+}
+
+func TestDepRemove(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var a1, a2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Issue A"}, &a1)
+		runJSONCommand(t, a, []string{"create", "--title", "Issue B"}, &a2)
+
+		runJSONCommand[map[string]any](t, a, []string{"dep", "add", a1.ID, a2.ID}, nil)
+
+		var depList struct {
+			Blockers []ait.IssueRef `json:"blockers"`
+		}
+		runJSONCommand(t, a, []string{"dep", "remove", a1.ID, a2.ID}, &depList)
+
+		if len(depList.Blockers) != 0 {
+			t.Fatalf("expected 0 blockers after remove, got %d", len(depList.Blockers))
+		}
+	})
+}
+
+func TestDepTree(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var a1, a2, a3 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Root"}, &a1)
+		runJSONCommand(t, a, []string{"create", "--title", "Mid"}, &a2)
+		runJSONCommand(t, a, []string{"create", "--title", "Leaf"}, &a3)
+
+		runJSONCommand[map[string]any](t, a, []string{"dep", "add", a1.ID, a2.ID}, nil)
+		runJSONCommand[map[string]any](t, a, []string{"dep", "add", a2.ID, a3.ID}, nil)
+
+		var tree ait.DependencyTree
+		runJSONCommand(t, a, []string{"dep", "tree", a1.ID}, &tree)
+
+		if tree.Issue.ID != a1.ID {
+			t.Fatalf("expected root %s, got %s", a1.ID, tree.Issue.ID)
+		}
+		if len(tree.Blockers) != 1 || tree.Blockers[0].Issue.ID != a2.ID {
+			t.Fatalf("expected mid-level blocker %s", a2.ID)
+		}
+		if len(tree.Blockers[0].Blockers) != 1 || tree.Blockers[0].Blockers[0].Issue.ID != a3.ID {
+			t.Fatalf("expected leaf blocker %s", a3.ID)
+		}
+	})
+}
+
+func TestDepAddTransitiveCycleDetection(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var a1, a2, a3 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "A"}, &a1)
+		runJSONCommand(t, a, []string{"create", "--title", "B"}, &a2)
+		runJSONCommand(t, a, []string{"create", "--title", "C"}, &a3)
+
+		// A blocked by B, B blocked by C
+		runJSONCommand[map[string]any](t, a, []string{"dep", "add", a1.ID, a2.ID}, nil)
+		runJSONCommand[map[string]any](t, a, []string{"dep", "add", a2.ID, a3.ID}, nil)
+
+		// C blocked by A would create A->B->C->A cycle
+		err := runExpectError(t, a, []string{"dep", "add", a3.ID, a1.ID})
+		if err == nil {
+			t.Fatal("expected cycle detection error")
+		}
+		if !strings.Contains(err.Error(), "cycle") {
+			t.Fatalf("expected cycle error message, got: %s", err.Error())
+		}
+	})
+}
+
+func TestDepAddSelfDependency(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var a1 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Self"}, &a1)
+
+		err := runExpectError(t, a, []string{"dep", "add", a1.ID, a1.ID})
+		if err == nil {
+			t.Fatal("expected self-dependency error")
+		}
+		if !strings.Contains(err.Error(), "itself") {
+			t.Fatalf("expected self-dependency message, got: %s", err.Error())
+		}
+	})
+}
+
+// --- Step 4c: List filtering tests ---
+
+func TestListFilterByType(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Epic", "--type", "epic"}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Task", "--type", "task"}, nil)
+
+		var result struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list", "--type", "task"}, &result)
+
+		if len(result.Issues) != 1 {
+			t.Fatalf("expected 1 task, got %d", len(result.Issues))
+		}
+		if result.Issues[0].Title != "Task" {
+			t.Fatalf("unexpected title: %s", result.Issues[0].Title)
+		}
+	})
+}
+
+func TestListFilterByPriority(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Urgent", "--priority", "P0"}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Normal", "--priority", "P2"}, nil)
+
+		var result struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list", "--priority", "P0"}, &result)
+
+		if len(result.Issues) != 1 {
+			t.Fatalf("expected 1 issue, got %d", len(result.Issues))
+		}
+		if result.Issues[0].Title != "Urgent" {
+			t.Fatalf("unexpected title: %s", result.Issues[0].Title)
+		}
+	})
+}
+
+func TestListFilterByStatus(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var created ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "To close"}, &created)
+		runJSONCommand[ait.Issue](t, a, []string{"close", created.ID}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Still open"}, nil)
+
+		var result struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list", "--status", "closed"}, &result)
+
+		if len(result.Issues) != 1 {
+			t.Fatalf("expected 1 closed issue, got %d", len(result.Issues))
+		}
+		if result.Issues[0].Title != "To close" {
+			t.Fatalf("unexpected title: %s", result.Issues[0].Title)
+		}
+	})
+}
+
+func TestListFilterByParent(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var epic ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Parent Epic", "--type", "epic"}, &epic)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Child 1", "--parent", epic.ID}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Child 2", "--parent", epic.ID}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Standalone"}, nil)
+
+		var result struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"list", "--parent", epic.ID}, &result)
+
+		if len(result.Issues) != 2 {
+			t.Fatalf("expected 2 children, got %d", len(result.Issues))
+		}
+	})
+}
+
+// --- Step 4d: Negative/error path tests ---
+
+func TestSearchReturnsMatches(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Authentication bug", "--description", "Login fails"}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Dashboard feature"}, nil)
+
+		var result struct {
+			Issues []ait.Issue `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"search", "Authentication"}, &result)
+
+		if len(result.Issues) != 1 {
+			t.Fatalf("expected 1 match, got %d", len(result.Issues))
+		}
+		if result.Issues[0].Title != "Authentication bug" {
+			t.Fatalf("unexpected title: %s", result.Issues[0].Title)
+		}
+	})
+}
+
+func TestShowNotFound(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		err := runExpectError(t, a, []string{"show", "nonexistent"})
+		if err == nil {
+			t.Fatal("expected not_found error")
+		}
+		if !strings.Contains(err.Error(), "not found") {
+			t.Fatalf("expected not found message, got: %s", err.Error())
+		}
+	})
+}
+
+func TestCancelAndReopen(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var created ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "To cancel"}, &created)
+
+		var cancelled ait.Issue
+		runJSONCommand(t, a, []string{"cancel", created.ID}, &cancelled)
+		if cancelled.Status != ait.StatusCancelled {
+			t.Fatalf("expected cancelled, got %s", cancelled.Status)
+		}
+
+		var reopened ait.Issue
+		runJSONCommand(t, a, []string{"reopen", created.ID}, &reopened)
+		if reopened.Status != ait.StatusOpen {
+			t.Fatalf("expected open after reopen, got %s", reopened.Status)
+		}
+	})
+}
+
+func TestCreateEpicWithParent(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var epic ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Parent", "--type", "epic"}, &epic)
+
+		err := runExpectError(t, a, []string{"create", "--title", "Nested epic", "--type", "epic", "--parent", epic.ID})
+		if err == nil {
+			t.Fatal("expected validation error for epic with parent")
+		}
+		if !strings.Contains(err.Error(), "epics cannot have a parent") {
+			t.Fatalf("unexpected error: %s", err.Error())
+		}
+	})
+}
+
+func TestCreateInvalidType(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		err := runExpectError(t, a, []string{"create", "--title", "Bad type", "--type", "story"})
+		if err == nil {
+			t.Fatal("expected validation error for invalid type")
+		}
+		if !strings.Contains(err.Error(), "type must be one of") {
+			t.Fatalf("unexpected error: %s", err.Error())
+		}
+	})
 }

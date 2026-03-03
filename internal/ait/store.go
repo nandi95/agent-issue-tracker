@@ -257,11 +257,19 @@ func (a *App) queryIssues(ctx context.Context, query string, params ...any) ([]I
 	return items, rows.Err()
 }
 
-func (a *App) readyIssues(ctx context.Context) ([]Issue, error) {
-	return a.queryIssues(
-		ctx,
-		fmt.Sprintf(
-			`SELECT %s
+func (a *App) queryIssueRefs(ctx context.Context, query string, params ...any) ([]IssueRef, error) {
+	rows, err := a.db.QueryContext(ctx, query, params...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanIssueRefs(rows)
+}
+
+func (a *App) readyIssues(ctx context.Context, typeFilter string) ([]Issue, error) {
+	query := fmt.Sprintf(
+		`SELECT %s
 		 FROM issues i
 		 LEFT JOIN issues parent ON parent.id = i.parent_id
 		 WHERE i.status IN (?, ?)
@@ -271,14 +279,39 @@ func (a *App) readyIssues(ctx context.Context) ([]Issue, error) {
 		     JOIN issues blockers ON blockers.id = d.blocker_id
 		     WHERE d.blocked_id = i.id
 		       AND blockers.status != ?
-		   )
-		 ORDER BY i.created_at ASC`,
-			issueSelectColumns("i"),
-		),
-		StatusOpen,
-		StatusInProgress,
-		StatusClosed,
+		   )`,
+		issueSelectColumns("i"),
 	)
+	params := []any{StatusOpen, StatusInProgress, StatusClosed}
+	if typeFilter != "" {
+		query += ` AND i.type = ?`
+		params = append(params, typeFilter)
+	}
+	query += ` ORDER BY i.created_at ASC`
+	return a.queryIssues(ctx, query, params...)
+}
+
+func (a *App) readyIssueRefs(ctx context.Context, typeFilter string) ([]IssueRef, error) {
+	query := fmt.Sprintf(
+		`SELECT %s
+		 FROM issues i
+		 WHERE i.status IN (?, ?)
+		   AND NOT EXISTS (
+		     SELECT 1
+		     FROM issue_dependencies d
+		     JOIN issues blockers ON blockers.id = d.blocker_id
+		     WHERE d.blocked_id = i.id
+		       AND blockers.status != ?
+		   )`,
+		issueRefSelectColumns("i"),
+	)
+	params := []any{StatusOpen, StatusInProgress, StatusClosed}
+	if typeFilter != "" {
+		query += ` AND i.type = ?`
+		params = append(params, typeFilter)
+	}
+	query += ` ORDER BY i.created_at ASC`
+	return a.queryIssueRefs(ctx, query, params...)
 }
 
 func (a *App) validateParent(ctx context.Context, parentID string) error {
@@ -295,6 +328,42 @@ func (a *App) hasDirectDependency(ctx context.Context, blockedID, blockerID int6
 	)
 	var found int
 	return row.Scan(&found) == nil
+}
+
+func (a *App) isReachable(ctx context.Context, fromID, toID int64) (bool, error) {
+	visited := map[int64]bool{fromID: true}
+	queue := []int64{fromID}
+
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+
+		rows, err := a.db.QueryContext(ctx,
+			`SELECT blocker_id FROM issue_dependencies WHERE blocked_id = ?`, current)
+		if err != nil {
+			return false, err
+		}
+
+		for rows.Next() {
+			var blockerID int64
+			if err := rows.Scan(&blockerID); err != nil {
+				rows.Close()
+				return false, err
+			}
+			if blockerID == toID {
+				rows.Close()
+				return true, nil
+			}
+			if !visited[blockerID] {
+				visited[blockerID] = true
+				queue = append(queue, blockerID)
+			}
+		}
+		if err := rows.Close(); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 func (a *App) buildDependencyTree(ctx context.Context, ref IssueRef, seen map[string]bool) (DependencyTree, error) {
