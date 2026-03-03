@@ -8,7 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-
 	_ "modernc.org/sqlite"
 )
 
@@ -16,19 +15,32 @@ type App struct {
 	db *sql.DB
 }
 
-func Open(ctx context.Context) (*App, error) {
-	dbPath, err := DatabasePath()
-	if err != nil {
-		return nil, err
+func Open(ctx context.Context, dbPath string) (*App, error) {
+	if dbPath == "" {
+		var err error
+		dbPath, err = DatabasePath()
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		return nil, err
+	if dbPath == ":memory:" {
+		// Keep all queries on a single connection so they share the same
+		// in-memory database. Safe now that no code path calls a.db while
+		// holding an open transaction.
+	} else {
+		if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
+			return nil, err
+		}
 	}
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, err
+	}
+
+	if dbPath == ":memory:" {
+		db.SetMaxOpenConns(1)
 	}
 
 	if _, err := db.ExecContext(ctx, `PRAGMA foreign_keys = ON;`); err != nil {
@@ -742,7 +754,6 @@ func syncPublicIDs(ctx context.Context, db *sql.DB, prefix string, forceRoot boo
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
 
 	nodes := make(map[int64]issueNode)
 	children := make(map[int64][]int64)
@@ -751,6 +762,7 @@ func syncPublicIDs(ctx context.Context, db *sql.DB, prefix string, forceRoot boo
 	for rows.Next() {
 		var node issueNode
 		if err := rows.Scan(&node.id, &node.parentID, &node.publicID); err != nil {
+			rows.Close()
 			return err
 		}
 		nodes[node.id] = node
@@ -761,8 +773,10 @@ func syncPublicIDs(ctx context.Context, db *sql.DB, prefix string, forceRoot boo
 		}
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return err
 	}
+	rows.Close()
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {

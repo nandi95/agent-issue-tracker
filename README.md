@@ -1,10 +1,10 @@
 # Agent Issue Tracker
 
-`agent-issue-tracker` is a small, local-first issue tracker built primarily for coding agents.
+`ait` is a small, local-first issue tracker built primarily for coding agents.
 
 It is intended to help an agent turn a plan into structured work, track dependencies, preserve notes between sessions, and quickly answer a practical question: what should I do next?
 
-Repository: `https://github.com/ohnotnow/agent-issue-tracker`
+Repository: `https://github.com/ohnotnow/ait`
 
 ## Status
 
@@ -14,9 +14,8 @@ It is being actively built and dogfooded, but it should not be treated as stable
 
 Current limitations include:
 
-- schema evolution is still early and not finalized
-- test coverage is improving but not complete
-- command behavior may change as the tool is dogfooded
+- schema evolution is still early and not finalised
+- command behaviour may change as the tool is dogfooded
 - compatibility and data migration guarantees do not exist yet
 
 If you try it, assume the data model and CLI may change.
@@ -35,21 +34,21 @@ Human-friendly output is intentionally secondary for now. JSON is the default in
 
 ## Current Command Set
 
-The current binary is `agent-issue-tracker`.
+The current binary is `ait`.
 
 Implemented commands:
 
 - `init`
 - `create`
 - `show`
-- `list`
+- `list` (`--type`, `--status`, `--priority`, `--parent`, `--all`, `--long`)
 - `status`
 - `search`
 - `update`
 - `close`
 - `reopen`
 - `cancel`
-- `ready`
+- `ready` (`--type`, `--long`)
 - `dep add`
 - `dep remove`
 - `dep list`
@@ -57,20 +56,37 @@ Implemented commands:
 - `note add`
 - `note list`
 
-## Initialization And IDs
+## Output Modes
 
-Run `agent-issue-tracker init --prefix <value>` to explicitly set the project prefix used for public issue IDs.
+By default, `list` and `ready` return a slim view with only the fields an agent typically needs: `id`, `title`, `status`, `type`, and `priority`. This keeps token usage low and makes it easier to reason about results quickly.
+
+Pass `--long` to get the full issue record including `description`, `parent_id`, timestamps, and `closed_at`.
+
+```bash
+ait list                  # slim (5 fields per issue)
+ait list --long           # full record
+ait ready --type task     # slim, tasks only (excludes epics)
+ait ready --long          # full record, all types
+```
+
+## Dependency Cycle Detection
+
+When adding a dependency with `dep add`, the tool performs a transitive reachability check. If the new dependency would create a cycle (e.g. A depends on B, B depends on C, and you try to make C depend on A), the command is rejected with a validation error.
+
+## Initialisation And IDs
+
+Run `ait init --prefix <value>` to set the project prefix used for public issue IDs.
 
 Examples:
 
-- `agent-issue-tracker init --prefix ait`
-- `agent-issue-tracker init --prefix deliveries`
+- `ait init --prefix ait`
+- `ait init --prefix deliveries`
 
 If no prefix has been set yet, the tool will infer one automatically the first time you use it by normalizing the current project directory basename.
 
 Examples:
 
-- a repository directory named `agent-issue-tracker` defaults to `agent-issue-tracker`
+- a repository directory named `ait` defaults to `ait`
 - a repository directory named `dta` defaults to `dta`
 
 The prefix is stored in local project configuration inside the SQLite database. Running `init --prefix ...` later will update the stored prefix and re-key existing public issue IDs to match.
@@ -82,6 +98,17 @@ Public issue IDs are hierarchical:
 - first grandchild: `<prefix>-<sqid>.1.1`
 
 This makes parent-child structure visible directly in the identifier while keeping the root segment compact and readable.
+
+## Custom Database Path
+
+By default, the database is stored at `.ait/ait.db` in the current git repository root. You can override this with the `--db` flag:
+
+```bash
+ait --db /path/to/other.db list
+ait --db /path/to/other.db create --title "Task in another DB"
+```
+
+This is useful for git worktrees (pointing back to the main repo's database), keeping separate databases for different subsystems, or using `:memory:` for testing.
 
 ## Local Storage
 
@@ -107,7 +134,7 @@ GOCACHE=$(pwd)/.gocache go test ./...
 To build the binary:
 
 ```bash
-GOCACHE=$(pwd)/.gocache go build -o agent-issue-tracker .
+GOCACHE=$(pwd)/.gocache go build -o ait .
 ```
 
 ## Warning

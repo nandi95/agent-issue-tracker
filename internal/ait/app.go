@@ -10,14 +10,14 @@ import (
 
 func (a *App) Run(ctx context.Context, args []string) error {
 	if len(args) == 0 {
-		return &CLIError{
-			Code:     "usage",
-			Message:  "missing command",
-			ExitCode: 64,
-		}
+		PrintHelp()
+		return nil
 	}
 
 	switch args[0] {
+	case "help", "--help":
+		PrintHelp()
+		return nil
 	case "init":
 		return a.runInit(ctx, args[1:])
 	case "create":
@@ -169,11 +169,11 @@ func (a *App) runCreate(ctx context.Context, args []string) error {
 			return err
 		}
 
-		parentIssue, err := a.fetchIssueByInternalID(ctx, parentInternalID.(int64))
-		if err != nil {
+		var parentPublicID string
+		if err := tx.QueryRowContext(ctx, `SELECT public_id FROM issues WHERE id = ?`, parentInternalID).Scan(&parentPublicID); err != nil {
 			return err
 		}
-		publicID = fmt.Sprintf("%s.%d", parentIssue.ID, siblingCount)
+		publicID = fmt.Sprintf("%s.%d", parentPublicID, siblingCount)
 	}
 
 	if _, err := tx.ExecContext(ctx, `UPDATE issues SET public_id = ? WHERE id = ?`, publicID, internalID); err != nil {
@@ -801,4 +801,32 @@ func (a *App) runNoteList(ctx context.Context, args []string) error {
 	}
 
 	return PrintJSON(map[string]any{"issue_id": issue.ID, "notes": items})
+}
+
+const helpText = `Usage: agent-issue-tracker [--db <path>] <command> [options]
+
+Commands:
+  init    --prefix <value>                   Set project prefix for issue IDs
+  create  --title <t> [--type] [--parent]    Create a new issue
+          [--description] [--priority]
+  show    <id>                               Show issue details and notes
+  list    [--type] [--status] [--priority]   List issues
+          [--parent] [--all] [--long]
+  search  <query>                            Search issues by text
+  status                                     Show project summary counts
+  ready   [--type] [--long]                  List unblocked issues
+  update  <id> --title|--status|--priority   Update an issue
+  close   <id>                               Close an issue
+  reopen  <id>                               Reopen a closed/cancelled issue
+  cancel  <id>                               Cancel an issue
+  dep     add|remove|list|tree <id> [<id>]   Manage dependencies
+  note    add|list <id> [body]               Manage notes
+  help                                       Show this help
+
+Global options:
+  --db <path>   Use a specific database file (default: .ait/ait.db)
+`
+
+func PrintHelp() {
+	fmt.Print(helpText)
 }

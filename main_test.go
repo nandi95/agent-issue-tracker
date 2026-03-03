@@ -15,23 +15,30 @@ import (
 )
 
 func TestStatusInitializesEmptyDatabase(t *testing.T) {
-	testApp(t, func(ctx context.Context, a *ait.App) {
-		var payload map[string]map[string]int
-		runJSONCommand(t, a, []string{"status"}, &payload)
+	tmpDir := t.TempDir()
+	dbPath := filepath.Join(tmpDir, "test.db")
 
-		counts := payload["counts"]
-		if counts["total"] != 0 {
-			t.Fatalf("expected total=0, got %d", counts["total"])
-		}
-		if counts["ready"] != 0 {
-			t.Fatalf("expected ready=0, got %d", counts["ready"])
-		}
+	ctx := context.Background()
+	app, err := ait.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer app.Close()
 
-		dbPath := mustDatabasePath(t)
-		if _, err := os.Stat(dbPath); err != nil {
-			t.Fatalf("expected database to exist at %s: %v", dbPath, err)
-		}
-	})
+	var payload map[string]map[string]int
+	runJSONCommand(t, app, []string{"status"}, &payload)
+
+	counts := payload["counts"]
+	if counts["total"] != 0 {
+		t.Fatalf("expected total=0, got %d", counts["total"])
+	}
+	if counts["ready"] != 0 {
+		t.Fatalf("expected ready=0, got %d", counts["ready"])
+	}
+
+	if _, err := os.Stat(dbPath); err != nil {
+		t.Fatalf("expected database to exist at %s: %v", dbPath, err)
+	}
 }
 
 func TestCreateAndShowIssue(t *testing.T) {
@@ -97,13 +104,7 @@ func TestInitSetsPrefixAndHierarchicalIDs(t *testing.T) {
 
 func TestOpenMigratesLegacyIDsToPublicKeys(t *testing.T) {
 	tmpDir := t.TempDir()
-	restoreCWD := withWorkingDir(t, tmpDir)
-	defer restoreCWD()
-
-	dbPath := mustDatabasePath(t)
-	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
-		t.Fatalf("mkdir failed: %v", err)
-	}
+	dbPath := filepath.Join(tmpDir, "legacy.db")
 
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
@@ -156,7 +157,7 @@ func TestOpenMigratesLegacyIDsToPublicKeys(t *testing.T) {
 		t.Fatalf("close legacy db failed: %v", err)
 	}
 
-	app, err := ait.Open(context.Background())
+	app, err := ait.Open(context.Background(), dbPath)
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -266,12 +267,8 @@ func TestStatusTransitions(t *testing.T) {
 func testApp(t *testing.T, fn func(ctx context.Context, a *ait.App)) {
 	t.Helper()
 
-	tmpDir := t.TempDir()
-	restoreCWD := withWorkingDir(t, tmpDir)
-	defer restoreCWD()
-
 	ctx := context.Background()
-	app, err := ait.Open(ctx)
+	app, err := ait.Open(ctx, ":memory:")
 	if err != nil {
 		t.Fatalf("Open failed: %v", err)
 	}
@@ -280,33 +277,6 @@ func testApp(t *testing.T, fn func(ctx context.Context, a *ait.App)) {
 	fn(ctx, app)
 }
 
-func withWorkingDir(t *testing.T, dir string) func() {
-	t.Helper()
-
-	current, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd failed: %v", err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir to temp dir failed: %v", err)
-	}
-
-	return func() {
-		if err := os.Chdir(current); err != nil {
-			t.Fatalf("restore cwd failed: %v", err)
-		}
-	}
-}
-
-func mustDatabasePath(t *testing.T) string {
-	t.Helper()
-
-	path, err := ait.DatabasePath()
-	if err != nil {
-		t.Fatalf("databasePath failed: %v", err)
-	}
-	return path
-}
 
 func runJSONCommand[T any](t *testing.T, a *ait.App, args []string, target *T) {
 	t.Helper()
@@ -732,6 +702,22 @@ func TestCreateEpicWithParent(t *testing.T) {
 		}
 		if !strings.Contains(err.Error(), "epics cannot have a parent") {
 			t.Fatalf("unexpected error: %s", err.Error())
+		}
+	})
+}
+
+func TestHelpShowsUsage(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		output := captureStdout(t, func() {
+			if err := a.Run(ctx, []string{"help"}); err != nil {
+				t.Fatalf("help failed: %v", err)
+			}
+		})
+
+		for _, want := range []string{"Commands:", "create", "list", "ready", "dep", "note", "--db"} {
+			if !strings.Contains(output, want) {
+				t.Fatalf("expected help to contain %q, got:\n%s", want, output)
+			}
 		}
 	})
 }
