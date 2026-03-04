@@ -1571,3 +1571,203 @@ func TestExportCancelledTask(t *testing.T) {
 		}
 	})
 }
+
+// --- Flush tests ---
+
+func TestFlushDeletesClosedIssues(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var task ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Done task"}, &task)
+		runJSONCommand[ait.Issue](t, a, []string{"close", task.ID}, nil)
+
+		var result ait.FlushResult
+		runJSONCommand(t, a, []string{"flush"}, &result)
+
+		if result.DryRun {
+			t.Fatal("expected dry_run=false")
+		}
+		if len(result.Flushed) != 1 {
+			t.Fatalf("expected 1 flushed, got %d", len(result.Flushed))
+		}
+		if result.Flushed[0].ID != task.ID {
+			t.Fatalf("expected flushed ID %s, got %s", task.ID, result.Flushed[0].ID)
+		}
+
+		// Verify it's actually gone.
+		err := runExpectError(t, a, []string{"show", task.ID})
+		if err == nil {
+			t.Fatal("expected not_found after flush")
+		}
+	})
+}
+
+func TestFlushDeletesCancelledIssues(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var task ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Cancelled task"}, &task)
+		runJSONCommand[ait.Issue](t, a, []string{"cancel", task.ID}, nil)
+
+		var result ait.FlushResult
+		runJSONCommand(t, a, []string{"flush"}, &result)
+
+		if len(result.Flushed) != 1 {
+			t.Fatalf("expected 1 flushed, got %d", len(result.Flushed))
+		}
+	})
+}
+
+func TestFlushSkipsOpenIssues(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var open ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Still open"}, &open)
+		var closed ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Done"}, &closed)
+		runJSONCommand[ait.Issue](t, a, []string{"close", closed.ID}, nil)
+
+		var result ait.FlushResult
+		runJSONCommand(t, a, []string{"flush"}, &result)
+
+		if len(result.Flushed) != 1 {
+			t.Fatalf("expected 1 flushed, got %d", len(result.Flushed))
+		}
+		if result.Flushed[0].ID != closed.ID {
+			t.Fatalf("expected flushed %s, got %s", closed.ID, result.Flushed[0].ID)
+		}
+
+		// Open issue should still exist.
+		var shown ait.ShowResponse
+		runJSONCommand(t, a, []string{"show", open.ID}, &shown)
+		if shown.Issue.Status != ait.StatusOpen {
+			t.Fatalf("expected open issue to survive flush")
+		}
+	})
+}
+
+func TestFlushDryRunDoesNotDelete(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var task ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Will survive"}, &task)
+		runJSONCommand[ait.Issue](t, a, []string{"close", task.ID}, nil)
+
+		var result ait.FlushResult
+		runJSONCommand(t, a, []string{"flush", "--dry-run"}, &result)
+
+		if !result.DryRun {
+			t.Fatal("expected dry_run=true")
+		}
+		if len(result.Flushed) != 1 {
+			t.Fatalf("expected 1 flushed in dry-run, got %d", len(result.Flushed))
+		}
+
+		// Issue should still exist after dry-run.
+		var shown ait.ShowResponse
+		runJSONCommand(t, a, []string{"show", task.ID}, &shown)
+		if shown.Issue.Status != ait.StatusClosed {
+			t.Fatalf("expected issue to survive dry-run")
+		}
+	})
+}
+
+func TestFlushSkipsClosedEpicWithOpenChildren(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var epic ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Mixed epic", "--type", "epic"}, &epic)
+		var closedChild ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Done child", "--parent", epic.ID}, &closedChild)
+		var openChild ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Open child", "--parent", epic.ID}, &openChild)
+		runJSONCommand[ait.Issue](t, a, []string{"close", closedChild.ID}, nil)
+		// Close the epic itself but leave one child open.
+		runJSONCommand[ait.Issue](t, a, []string{"close", epic.ID}, nil)
+
+		var result ait.FlushResult
+		runJSONCommand(t, a, []string{"flush"}, &result)
+
+		if len(result.Flushed) != 0 {
+			t.Fatalf("expected 0 flushed (epic has open child), got %d", len(result.Flushed))
+		}
+		if len(result.Skipped) != 1 {
+			t.Fatalf("expected 1 skipped, got %d", len(result.Skipped))
+		}
+		if result.Skipped[0].ID != epic.ID {
+			t.Fatalf("expected skipped %s, got %s", epic.ID, result.Skipped[0].ID)
+		}
+	})
+}
+
+func TestFlushDeletesEpicWithAllClosedChildren(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var epic ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Complete epic", "--type", "epic"}, &epic)
+		var child1 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Child 1", "--parent", epic.ID}, &child1)
+		var child2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Child 2", "--parent", epic.ID}, &child2)
+		runJSONCommand[ait.Issue](t, a, []string{"close", child1.ID}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"close", child2.ID}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"close", epic.ID}, nil)
+
+		var result ait.FlushResult
+		runJSONCommand(t, a, []string{"flush"}, &result)
+
+		// Should flush the epic + both children.
+		if len(result.Flushed) != 3 {
+			t.Fatalf("expected 3 flushed, got %d", len(result.Flushed))
+		}
+		if len(result.Skipped) != 0 {
+			t.Fatalf("expected 0 skipped, got %d", len(result.Skipped))
+		}
+
+		// All should be gone.
+		for _, id := range []string{epic.ID, child1.ID, child2.ID} {
+			err := runExpectError(t, a, []string{"show", id})
+			if err == nil {
+				t.Fatalf("expected %s to be deleted", id)
+			}
+		}
+	})
+}
+
+func TestFlushDeletesNotesAndDependencies(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var task1 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Task with note"}, &task1)
+		runJSONCommand[ait.Note](t, a, []string{"note", "add", task1.ID, "A progress note"}, nil)
+
+		var task2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Blocker task"}, &task2)
+		runJSONCommand[map[string]any](t, a, []string{"dep", "add", task1.ID, task2.ID}, nil)
+
+		runJSONCommand[ait.Issue](t, a, []string{"close", task2.ID}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"close", task1.ID}, nil)
+
+		var result ait.FlushResult
+		runJSONCommand(t, a, []string{"flush"}, &result)
+
+		if len(result.Flushed) != 2 {
+			t.Fatalf("expected 2 flushed, got %d", len(result.Flushed))
+		}
+
+		// Both gone — notes and deps should be cascade-deleted.
+		for _, id := range []string{task1.ID, task2.ID} {
+			err := runExpectError(t, a, []string{"show", id})
+			if err == nil {
+				t.Fatalf("expected %s to be deleted", id)
+			}
+		}
+	})
+}
+
+func TestFlushOnEmptyDatabase(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var result ait.FlushResult
+		runJSONCommand(t, a, []string{"flush"}, &result)
+
+		if len(result.Flushed) != 0 {
+			t.Fatalf("expected 0 flushed on empty db, got %d", len(result.Flushed))
+		}
+		if len(result.Skipped) != 0 {
+			t.Fatalf("expected 0 skipped on empty db, got %d", len(result.Skipped))
+		}
+	})
+}
