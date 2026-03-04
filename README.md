@@ -223,6 +223,7 @@ The `claude/` directory contains pre-written [Claude Code](https://docs.anthropi
 - **`claude/skills/ait/SKILL.md`** — core command reference, workflow patterns, and best practices
 - **`claude/skills/ait/DELEGATION.md`** — guide for delegating work to sub-agents via Markdown export
 - **`claude/agents/plan-to-ait.md`** — agent that converts plan-mode plans into structured ait epics and issues
+- **`claude/commands/hello-ait.md`** — example session-start command that reads the README and checks for outstanding work. This is a boilerplate starting point — edit it to suit your own conversational style.
 
 To install, copy the skill and agent directories into your Claude configuration:
 
@@ -230,10 +231,12 @@ To install, copy the skill and agent directories into your Claude configuration:
 # For a single project (from the project root):
 cp -r claude/skills/ait .claude/skills/ait
 cp -r claude/agents/plan-to-ait.md .claude/agents/plan-to-ait.md
+cp -r claude/commands/hello-ait.md .claude/commands/hello-ait.md
 
 # Or globally (available in all projects):
 cp -r claude/skills/ait ~/.claude/skills/ait
 cp -r claude/agents/plan-to-ait.md ~/.claude/agents/plan-to-ait.md
+cp -r claude/commands/hello-ait.md ~/.claude/commands/hello-ait.md
 ```
 
 Once installed, Claude Code will know the full command set and can follow the delegation workflow when supervising sub-agents. The plan-to-ait agent can be used to convert approved plans into consultant-ready epics and issues.
