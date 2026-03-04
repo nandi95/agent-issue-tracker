@@ -59,6 +59,7 @@ Implemented commands:
 - `claim`
 - `unclaim`
 - `ready` (`--type`, `--long`)
+- `flush` (`--dry-run`)
 - `dep add`
 - `dep remove`
 - `dep list`
@@ -110,6 +111,17 @@ ait close <epic-id> --cascade
 ```
 
 This recursively closes all open or in-progress children and grandchildren. Issues that are already closed or cancelled are skipped. The command returns the list of newly closed issues.
+
+## Flush
+
+The `flush` command permanently deletes all closed and cancelled issues to keep the database lean. Since `ait` tracks ephemeral work, there is no need to keep completed issues around indefinitely.
+
+```bash
+ait flush              # delete all terminal issues
+ait flush --dry-run    # preview what would be deleted
+```
+
+Flush only removes **root-level** issues whose entire descendant tree is also closed or cancelled. If a closed epic still has open or in-progress children, it is skipped and reported in the `skipped` list. Notes and dependencies belonging to flushed issues are removed automatically via cascade delete.
 
 ## Markdown Export and Delegation
 

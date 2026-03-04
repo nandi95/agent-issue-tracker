@@ -58,6 +58,8 @@ func (a *App) Run(ctx context.Context, args []string) error {
 		return a.runNote(ctx, args[1:])
 	case "export":
 		return a.runExport(ctx, args[1:])
+	case "flush":
+		return a.runFlush(ctx, args[1:])
 	default:
 		return &CLIError{
 			Code:     "usage",
@@ -1098,6 +1100,27 @@ func (a *App) runExport(ctx context.Context, args []string) error {
 	return nil
 }
 
+func (a *App) runFlush(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("flush", flag.ContinueOnError)
+	dryRun := fs.Bool("dry-run", false, "")
+	fs.SetOutput(io.Discard)
+
+	if err := fs.Parse(args); err != nil {
+		if isHelpRequested(err) {
+			PrintHelp()
+			return nil
+		}
+		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
+	}
+
+	result, err := a.flushTerminalIssues(ctx, *dryRun)
+	if err != nil {
+		return err
+	}
+
+	return PrintJSON(result)
+}
+
 const helpText = `Usage: ait [--db <path>] <command> [options]
 
 Commands:
@@ -1121,6 +1144,7 @@ Commands:
   dep     add|remove|list|tree <id> [<id>]   Manage dependencies
   note    add|list <id> [body]               Manage notes
   export  <id> [--output path.md]           Export Markdown briefing
+  flush   [--dry-run]                       Purge closed/cancelled issues
   help                                       Show this help
 
 Global options:

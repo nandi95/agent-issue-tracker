@@ -79,6 +79,19 @@ ait note add <id> "Note body text"   # Attach a note to an issue
 ait note list <id>                   # List notes for an issue
 ```
 
+### Flush (Housekeeping)
+```bash
+ait flush              # permanently delete all closed/cancelled issues
+ait flush --dry-run    # preview what would be deleted without changing anything
+```
+Flush removes root-level issues whose entire descendant tree is also closed or
+cancelled. Notes and dependencies are cascade-deleted automatically.
+
+**Important:** If the `skipped` list in the response is non-empty, it means a
+closed epic has open or in-progress children — something that probably needs
+human attention. Flag this to the user and suggest they review the skipped
+issues before deciding what to do.
+
 ### Claiming (Multi-Agent)
 ```bash
 ait claim <id> <agent-name>    # Claim an issue (prevents duplicate work)
@@ -159,6 +172,8 @@ export → delegate → reconcile workflow.
   to unblocked issues and sorts by priority.
 - Use notes liberally — they survive session loss and conversation compaction.
 - Use `--cascade` on close to avoid closing children one by one.
+- Run `ait flush` periodically to keep the database lean — the tracker is for
+  ephemeral work, so there is no need to keep completed issues forever.
 - `ait show <id>` returns children, blockers, and notes in one call — use it to
   get full context before starting work.
 - The database lives at `.ait/ait.db` in the git root. It is a plain SQLite file

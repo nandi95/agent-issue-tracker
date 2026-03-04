@@ -705,6 +705,122 @@ func migrateLegacySchema(ctx context.Context, db *sql.DB) error {
 	return tx.Commit()
 }
 
+// FlushResult is the JSON response returned by the flush command.
+type FlushResult struct {
+	DryRun  bool       `json:"dry_run"`
+	Flushed []IssueRef `json:"flushed"`
+	Skipped []IssueRef `json:"skipped"`
+}
+
+// flushTerminalIssues deletes all root-level closed/cancelled issues
+// whose entire descendant tree is also closed/cancelled. Children are
+// removed via ON DELETE CASCADE. Issues with live descendants are skipped.
+func (a *App) flushTerminalIssues(ctx context.Context, dryRun bool) (FlushResult, error) {
+	// Find closed/cancelled root issues (no parent).
+	roots, err := a.queryIssueRefs(ctx,
+		fmt.Sprintf(
+			`SELECT %s FROM issues i WHERE i.status IN (?, ?) AND i.parent_id IS NULL ORDER BY i.created_at ASC`,
+			issueRefSelectColumns("i"),
+		),
+		StatusClosed, StatusCancelled,
+	)
+	if err != nil {
+		return FlushResult{}, err
+	}
+
+	result := FlushResult{
+		DryRun:  dryRun,
+		Flushed: make([]IssueRef, 0),
+		Skipped: make([]IssueRef, 0),
+	}
+
+	for _, root := range roots {
+		internalID, err := a.resolveIssueID(ctx, root.ID)
+		if err != nil {
+			return FlushResult{}, err
+		}
+
+		allTerminal, err := a.allDescendantsTerminal(ctx, internalID)
+		if err != nil {
+			return FlushResult{}, err
+		}
+		if !allTerminal {
+			result.Skipped = append(result.Skipped, root)
+			continue
+		}
+
+		// Collect this root and all its descendants for reporting.
+		descendants, err := a.fetchAllDescendants(ctx, internalID)
+		if err != nil {
+			return FlushResult{}, err
+		}
+		result.Flushed = append(result.Flushed, root)
+		for _, d := range descendants {
+			result.Flushed = append(result.Flushed, IssueRef{
+				ID: d.ID, Title: d.Title, Status: d.Status, Type: d.Type, Priority: d.Priority,
+			})
+		}
+
+		if !dryRun {
+			// Delete descendants bottom-up, then the root.
+			// ON DELETE CASCADE handles notes and dependencies.
+			for i := len(descendants) - 1; i >= 0; i-- {
+				descID, err := a.resolveIssueID(ctx, descendants[i].ID)
+				if err != nil {
+					return FlushResult{}, err
+				}
+				if _, err := a.db.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, descID); err != nil {
+					return FlushResult{}, err
+				}
+			}
+			if _, err := a.db.ExecContext(ctx, `DELETE FROM issues WHERE id = ?`, internalID); err != nil {
+				return FlushResult{}, err
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// allDescendantsTerminal returns true if every descendant of the given
+// issue is closed or cancelled.
+func (a *App) allDescendantsTerminal(ctx context.Context, parentID int64) (bool, error) {
+	rows, err := a.db.QueryContext(ctx, `SELECT id, status FROM issues WHERE parent_id = ?`, parentID)
+	if err != nil {
+		return false, err
+	}
+	type child struct {
+		id     int64
+		status string
+	}
+	var children []child
+	for rows.Next() {
+		var c child
+		if err := rows.Scan(&c.id, &c.status); err != nil {
+			rows.Close()
+			return false, err
+		}
+		children = append(children, c)
+	}
+	if err := rows.Close(); err != nil {
+		return false, err
+	}
+
+	for _, c := range children {
+		if c.status != StatusClosed && c.status != StatusCancelled {
+			return false, nil
+		}
+		ok, err := a.allDescendantsTerminal(ctx, c.id)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func syncPublicIDs(ctx context.Context, db *sql.DB, prefix string, forceRoot bool) error {
 	type issueNode struct {
 		id       int64
