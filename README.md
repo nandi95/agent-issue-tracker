@@ -273,4 +273,4 @@ The current focus is to validate the workflow by using the tool on itself, tight
 ## Contributors
 
 - [ohnotnow](https://github.com/ohnotnow) — creator and maintainer
-- [nandi95](https://github.com/nandi95) — version check code
+- [nandi95](https://github.com/nandi95) — version check idea and original code
