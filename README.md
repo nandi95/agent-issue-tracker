@@ -196,24 +196,27 @@ That database stores:
 
 This keeps issue state close to the codebase it belongs to and makes it easy to inspect or back up.
 
-## Claude Code Skills
+## Claude Code Skills and Agents
 
-The `skills/ait/` directory contains pre-written [Claude Code skills](https://docs.anthropic.com/en/docs/claude-code) that teach Claude how to use `ait` effectively:
+The `claude/` directory contains pre-written [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skills and agents that teach Claude how to use `ait` effectively:
 
-- **`SKILL.md`** — core command reference, workflow patterns, and best practices
-- **`DELEGATION.md`** — guide for delegating work to sub-agents via Markdown export
+- **`claude/skills/ait/SKILL.md`** — core command reference, workflow patterns, and best practices
+- **`claude/skills/ait/DELEGATION.md`** — guide for delegating work to sub-agents via Markdown export
+- **`claude/agents/plan-to-ait.md`** — agent that converts plan-mode plans into structured ait epics and issues
 
-To install, copy the skill directory into your Claude skills location:
+To install, copy the skill and agent directories into your Claude configuration:
 
 ```bash
 # For a single project (from the project root):
-cp -r skills/ait .claude/skills/ait
+cp -r claude/skills/ait .claude/skills/ait
+cp -r claude/agents/plan-to-ait.md .claude/agents/plan-to-ait.md
 
 # Or globally (available in all projects):
-cp -r skills/ait ~/.claude/skills/ait
+cp -r claude/skills/ait ~/.claude/skills/ait
+cp -r claude/agents/plan-to-ait.md ~/.claude/agents/plan-to-ait.md
 ```
 
-Once installed, Claude Code will know the full command set and can follow the delegation workflow when supervising sub-agents.
+Once installed, Claude Code will know the full command set and can follow the delegation workflow when supervising sub-agents. The plan-to-ait agent can be used to convert approved plans into consultant-ready epics and issues.
 
 ## Development
 
