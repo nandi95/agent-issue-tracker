@@ -29,8 +29,15 @@ The tool is optimized for agent workflow first:
 - claim issues to coordinate between multiple agents
 - resume work after session loss or conversation compaction
 - surface unblocked work via `ready`, ordered by priority
+- allow delegation of work to sub-agents
 
 Human-friendly output is intentionally secondary for now. JSON is the default interface.
+
+## What it is not 
+
+The tool is not a replacement for a real issue tracker.  The workflow is envisioned as 'developer has a plan/issues/feature - gets the coding agent to plan them out (or does it themselves), then the actual coding agent manages the sub-epics/issues for that work alone.
+
+It's not designed to handle cross-team shared issues, work, projects.  The internal database should be added to .gitignore.
 
 ## Current Command Set
 
@@ -104,25 +111,25 @@ ait close <epic-id> --cascade
 
 This recursively closes all open or in-progress children and grandchildren. Issues that are already closed or cancelled are skipped. The command returns the list of newly closed issues.
 
-## Markdown Export
+## Markdown Export and Delegation
 
-The `export` command produces a Markdown briefing for an issue and all its descendants. This is designed for delegating work to remote or cloud-based agents that don't have access to the `.ait/` database.
+The `export` command produces a self-contained Markdown briefing for an issue and all its descendants. This supports a lightweight delegation workflow for handing work to sub-agents that don't have access to the `ait` binary, or don't need to know about it at all.
 
 ```bash
-ait export <id>                     # print Markdown to stdout
+ait export <id>                       # print Markdown to stdout
 ait export <id> --output briefing.md  # write to file
 ```
 
-For an epic, the output includes:
+For an epic, the output includes the title, ID, priority, description, a task checklist ordered by priority, dependencies, notes, and a summary with counts. The resulting file is also useful as a human-readable report of an epic's current state.
 
-- the epic title, ID, priority, and description
-- a `## Tasks` section with checkbox items (`[ ]` open, `[x]` closed, `[-]` cancelled)
-- dependencies and notes for each issue
-- a `## Summary` with counts
+The delegation workflow is straightforward:
 
-Tasks are ordered by priority (P0 first), matching `ready` behaviour. For a single task with no children, only the header, description, notes, and dependencies are shown.
+1. **Export** an epic as a Markdown briefing
+2. **Delegate** the file to a sub-agent — in a worktree, background process, or remote context
+3. The sub-agent **works through the checklist** — no tracker needed
+4. The supervisor agent **reconciles** the results back into the tracker by closing completed tasks
 
-The resulting file travels with git or rsync, is readable by any agent or human, and requires no reconciliation.
+This keeps the contract in plain Markdown, so it works across context boundaries, and doesn't couple the receiving agent to any tooling. For the full workflow with worked examples, see [claude/skills/ait/DELEGATION.md](claude/skills/ait/DELEGATION.md).
 
 ## Ready Prioritisation
 
