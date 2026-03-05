@@ -8,14 +8,7 @@ Repository: `https://github.com/ohnotnow/agent-issue-tracker`
 
 ## Status
 
-This project is an early work in progress.
-
-It is being actively built and dogfooded, but it should not be treated as stable, production-ready, or safe for real project tracking yet.
-
-Current limitations include:
-
-- command behaviour may change as the tool is dogfooded
-- compatibility guarantees do not exist yet
+This project is working - but use at your own risk.  It's been used on real projects, but no guarantees are made about API stability or compatibility.  However, of note - it's effectively feature complete.  The project has a fairly tight scope - and all expected features are implemented.  If you need something 'fancier' - then look for another tool.
 
 Schema changes are now managed through a forward-only migration system, so existing databases are upgraded automatically on startup.
 
@@ -40,10 +33,6 @@ The tool is not a replacement for a real issue tracker.  The workflow is envisio
 It's not designed to handle cross-team shared issues, work, projects.  The internal database should be added to .gitignore.
 
 ## Current Command Set
-
-The current binary is `ait`.
-
-Implemented commands:
 
 - `init`
 - `config`
@@ -173,11 +162,6 @@ Examples:
 
 If no prefix has been set yet, the tool will infer one automatically the first time you use it by normalizing the current project directory basename.
 
-Examples:
-
-- a repository directory named `ait` defaults to `ait`
-- a repository directory named `dta` defaults to `dta`
-
 The prefix is stored in local project configuration inside the SQLite database. Running `init --prefix ...` later will update the stored prefix and re-key existing public issue IDs to match.
 
 Public issue IDs are hierarchical:
@@ -218,32 +202,16 @@ This keeps issue state close to the codebase it belongs to and makes it easy to 
 
 ## Claude Code Skills and Agents
 
-The `claude/` directory contains pre-written [Claude Code](https://docs.anthropic.com/en/docs/claude-code) skills and agents that teach Claude how to use `ait` effectively:
+The `claude/` directory contains pre-written skills and agents that teach an agent how to use `ait` effectively:
 
 - **`claude/skills/ait/SKILL.md`** — core command reference, workflow patterns, and best practices
 - **`claude/skills/ait/DELEGATION.md`** — guide for delegating work to sub-agents via Markdown export
 - **`claude/agents/plan-to-ait.md`** — agent that converts plan-mode plans into structured ait epics and issues
 - **`claude/commands/hello-ait.md`** — example session-start command that reads the README and checks for outstanding work. This is a boilerplate starting point — edit it to suit your own conversational style.
 
-To install, copy the skill and agent directories into your Claude configuration:
-
-```bash
-# For a single project (from the project root):
-cp -r claude/skills/ait .claude/skills/ait
-cp -r claude/agents/plan-to-ait.md .claude/agents/plan-to-ait.md
-cp -r claude/commands/hello-ait.md .claude/commands/hello-ait.md
-
-# Or globally (available in all projects):
-cp -r claude/skills/ait ~/.claude/skills/ait
-cp -r claude/agents/plan-to-ait.md ~/.claude/agents/plan-to-ait.md
-cp -r claude/commands/hello-ait.md ~/.claude/commands/hello-ait.md
-```
-
-Once installed, Claude Code will know the full command set and can follow the delegation workflow when supervising sub-agents. The plan-to-ait agent can be used to convert approved plans into consultant-ready epics and issues.
+To install, copy the skill and agent directories into your agents configuration directory (eg, `~/.claude/skills/`, `~/.claude/agents/`
 
 ## Development
-
-Current development priorities are tracked in the tool itself.
 
 To run the test suite:
 
@@ -267,11 +235,9 @@ If you fork this repository and want the update check to point at your own relea
 go build -ldflags "-X agent-issue-tracker/internal/ait.Version=v0.1.0 -X agent-issue-tracker/internal/ait.RepoURL=https://github.com/youruser/yourfork" -o ait .
 ```
 
-## Warning
+### Technical Notes
 
-Do not rely on this for important or long-lived work yet.
-
-The current focus is to validate the workflow by using the tool on itself, tighten the schema and command contract, and improve safety before calling it a usable v1.
+There is a [technical overview](TECHNICAL_OVERVIEW.md) document that explains the internals of the tool.
 
 ## Contributors
 
