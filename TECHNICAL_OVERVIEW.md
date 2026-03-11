@@ -24,6 +24,7 @@ internal/ait/types.go    Core types, validation, JSON/error helpers
 internal/ait/config.go   Project root detection, DB path, prefix normalization/inference
 internal/ait/keys.go     Root public ID generation using Sqids
 internal/ait/format.go   Human/tree list rendering and Markdown export formatting
+internal/ait/completion.go  Shell completion script generation (bash, zsh)
 internal/ait/version.go  `version` command and GitHub release check
 main_test.go             End-to-end CLI behavior tests against in-memory/temp SQLite DBs
 internal/ait/version_test.go  Unit tests for version comparison and release URL logic
@@ -91,6 +92,7 @@ Primary commands implemented in [internal/ait/app.go](/Users/billy/Documents/cod
 - Dependencies: `dep add`, `dep remove`, `dep list`, `dep tree`
 - Notes: `note add`, `note list`
 - Reporting/cleanup: `export`, `flush`, `version`
+- Shell integration: `completion`
 
 ### Output Modes
 
@@ -99,19 +101,23 @@ Primary commands implemented in [internal/ait/app.go](/Users/billy/Documents/cod
 - `list --human` prints grouped tabular output
 - `list --tree` prints ASCII hierarchy
 - `export` is the only command that emits Markdown instead of JSON
+- Every subcommand supports `--help`/`-h` for command-specific usage text
+- `completion` is handled in `main.go` before `Open()` (no database needed)
 
 ## Business Logic And Conventions
 
 | Location | Purpose |
 | --- | --- |
-| [internal/ait/app.go](/Users/billy/Documents/code/agent-issue-tracker/internal/ait/app.go) | CLI parsing, validation, command orchestration |
+| [internal/ait/app.go](/Users/billy/Documents/code/agent-issue-tracker/internal/ait/app.go) | CLI parsing, validation, command orchestration, per-command help text |
 | [internal/ait/store.go](/Users/billy/Documents/code/agent-issue-tracker/internal/ait/store.go) | Query helpers, dependency traversal, ready selection, flush logic, schema bootstrap |
 | [internal/ait/migrate.go](/Users/billy/Documents/code/agent-issue-tracker/internal/ait/migrate.go) | Ordered forward-only migrations with `schema_version` |
 | [internal/ait/format.go](/Users/billy/Documents/code/agent-issue-tracker/internal/ait/format.go) | Human-readable list rendering and Markdown briefing generation |
+| [internal/ait/completion.go](/Users/billy/Documents/code/agent-issue-tracker/internal/ait/completion.go) | Bash and zsh completion script generation |
 | [internal/ait/config.go](/Users/billy/Documents/code/agent-issue-tracker/internal/ait/config.go) | Prefix normalization/inference and project-root-based DB placement |
 
 ### Notable Behavior
 
+- `search` is case-insensitive (uses `LIKE ... COLLATE NOCASE`).
 - `ready` includes only `open` and `in_progress` issues with no non-closed blockers.
 - Ready items are ordered by priority first, then creation time.
 - `list` hides `closed` and `cancelled` items unless `--all` or an explicit `--status` is provided.

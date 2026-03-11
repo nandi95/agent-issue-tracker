@@ -57,6 +57,50 @@ It's not designed to handle cross-team shared issues, work, projects.  The inter
 - `note list`
 - `version`
 - `export` (`--output`)
+- `completion` (`bash`, `zsh`)
+
+## Per-command Help
+
+Every subcommand supports `--help` (or `-h`) for command-specific usage, flags, and examples:
+
+```bash
+ait list --help
+ait dep add --help
+ait create -h
+```
+
+## Shell Autocompletion
+
+Tab completion is available for bash and zsh. It completes subcommands, flags, flag values (status, type, priority), and issue IDs.
+
+**Bash** — add to `~/.bashrc` or `~/.bash_profile`:
+
+```bash
+eval "$(ait completion bash)"
+```
+
+**Zsh** — add to `~/.zshrc`:
+
+```bash
+eval "$(ait completion zsh)"
+```
+
+Restart your shell or source the file, then use Tab to complete:
+
+```bash
+ait <Tab>              # subcommands
+ait list --<Tab>       # flags
+ait show <Tab>         # issue IDs
+ait list --status <Tab> # status values
+```
+
+## Search
+
+The `search` command matches against issue titles and descriptions, case-insensitively:
+
+```bash
+ait search "auth"      # matches "Auth Flow", "AUTH_TOKEN", etc.
+```
 
 ## Output Modes
 
