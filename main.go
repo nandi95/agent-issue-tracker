@@ -28,6 +28,17 @@ func main() {
 		return
 	}
 
+	if args[0] == "completion" {
+		if len(args) < 2 {
+			ait.PrintCommandHelp("completion")
+			return
+		}
+		if err := ait.RunCompletion(args[1]); err != nil {
+			ait.ExitWithError(ait.NormalizeError(err))
+		}
+		return
+	}
+
 	app, err := ait.Open(ctx, dbPath)
 	if err != nil {
 		ait.ExitWithError(ait.NormalizeError(err))

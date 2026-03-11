@@ -264,6 +264,88 @@ func TestStatusTransitions(t *testing.T) {
 	})
 }
 
+func TestCaseInsensitiveSearch(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Auth Flow"}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "AUTH_TOKEN handler"}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"create", "--title", "Unrelated task"}, nil)
+
+		var result struct {
+			Issues []ait.Issue `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"search", "auth"}, &result)
+
+		if len(result.Issues) != 2 {
+			t.Fatalf("expected 2 results for case-insensitive search, got %d", len(result.Issues))
+		}
+	})
+}
+
+func TestSubcommandHelp(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		// Commands that use FlagSet
+		for _, cmd := range [][]string{
+			{"list", "--help"},
+			{"create", "-h"},
+			{"ready", "--help"},
+			{"flush", "-h"},
+		} {
+			output := captureStdout(t, func() {
+				if err := a.Run(context.Background(), cmd); err != nil {
+					t.Fatalf("run(%v) failed: %v", cmd, err)
+				}
+			})
+			if output == "" {
+				t.Fatalf("expected help output for %v, got empty", cmd)
+			}
+		}
+
+		// Commands without FlagSet
+		for _, cmd := range [][]string{
+			{"show", "--help"},
+			{"search", "-h"},
+			{"reopen", "--help"},
+			{"close", "-h"},
+			{"dep", "--help"},
+			{"note", "--help"},
+			{"export", "--help"},
+		} {
+			output := captureStdout(t, func() {
+				if err := a.Run(context.Background(), cmd); err != nil {
+					t.Fatalf("run(%v) failed: %v", cmd, err)
+				}
+			})
+			if output == "" {
+				t.Fatalf("expected help output for %v, got empty", cmd)
+			}
+		}
+	})
+}
+
+func TestCompletionScripts(t *testing.T) {
+	output := captureStdout(t, func() {
+		if err := ait.RunCompletion("bash"); err != nil {
+			t.Fatalf("RunCompletion(bash) failed: %v", err)
+		}
+	})
+	if output == "" {
+		t.Fatal("expected non-empty bash completion script")
+	}
+
+	output = captureStdout(t, func() {
+		if err := ait.RunCompletion("zsh"); err != nil {
+			t.Fatalf("RunCompletion(zsh) failed: %v", err)
+		}
+	})
+	if output == "" {
+		t.Fatal("expected non-empty zsh completion script")
+	}
+
+	if err := ait.RunCompletion("fish"); err == nil {
+		t.Fatal("expected error for unsupported shell 'fish'")
+	}
+}
+
 func testApp(t *testing.T, fn func(ctx context.Context, a *ait.App)) {
 	t.Helper()
 

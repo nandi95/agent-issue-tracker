@@ -76,7 +76,7 @@ func (a *App) runInit(ctx context.Context, args []string) error {
 
 	if err := fs.Parse(args); err != nil {
 		if isHelpRequested(err) {
-			PrintHelp()
+			PrintCommandHelp("init")
 			return nil
 		}
 		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
@@ -132,7 +132,7 @@ func (a *App) runCreate(ctx context.Context, args []string) error {
 
 	if err := fs.Parse(args); err != nil {
 		if isHelpRequested(err) {
-			PrintHelp()
+			PrintCommandHelp("create")
 			return nil
 		}
 		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
@@ -235,6 +235,10 @@ func (a *App) runCreate(ctx context.Context, args []string) error {
 }
 
 func (a *App) runShow(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("show")
+		return nil
+	}
 	if len(args) != 1 {
 		return &CLIError{Code: "usage", Message: "usage: ait show <id>", ExitCode: 64}
 	}
@@ -288,7 +292,7 @@ func (a *App) runList(ctx context.Context, args []string) error {
 
 	if err := fs.Parse(args); err != nil {
 		if isHelpRequested(err) {
-			PrintHelp()
+			PrintCommandHelp("list")
 			return nil
 		}
 		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
@@ -424,6 +428,10 @@ func (a *App) runStatus(ctx context.Context) error {
 }
 
 func (a *App) runSearch(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("search")
+		return nil
+	}
 	if len(args) != 1 {
 		return &CLIError{Code: "usage", Message: "usage: ait search <keyword>", ExitCode: 64}
 	}
@@ -435,7 +443,7 @@ func (a *App) runSearch(ctx context.Context, args []string) error {
 			`SELECT %s
 			 FROM issues i
 			 LEFT JOIN issues parent ON parent.id = i.parent_id
-			 WHERE i.title LIKE ? OR i.description LIKE ?
+			 WHERE i.title LIKE ? COLLATE NOCASE OR i.description LIKE ? COLLATE NOCASE
 			 ORDER BY i.created_at ASC`,
 			issueSelectColumns("i"),
 		),
@@ -545,6 +553,10 @@ func (a *App) runUpdate(ctx context.Context, args []string) error {
 }
 
 func (a *App) runStatusChange(ctx context.Context, args []string, nextStatus string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp(CommandNameForStatus(nextStatus))
+		return nil
+	}
 	if len(args) != 1 {
 		return &CLIError{Code: "usage", Message: fmt.Sprintf("usage: ait %s <id>", CommandNameForStatus(nextStatus)), ExitCode: 64}
 	}
@@ -585,6 +597,10 @@ func (a *App) runStatusChange(ctx context.Context, args []string, nextStatus str
 }
 
 func (a *App) runClaim(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("claim")
+		return nil
+	}
 	if len(args) != 2 {
 		return &CLIError{Code: "usage", Message: "usage: ait claim <id> <agent-name>", ExitCode: 64}
 	}
@@ -626,6 +642,10 @@ func (a *App) runClaim(ctx context.Context, args []string) error {
 }
 
 func (a *App) runUnclaim(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("unclaim")
+		return nil
+	}
 	if len(args) != 1 {
 		return &CLIError{Code: "usage", Message: "usage: ait unclaim <id>", ExitCode: 64}
 	}
@@ -656,6 +676,10 @@ func (a *App) runClose(ctx context.Context, args []string) error {
 	cascade := false
 	var filtered []string
 	for _, arg := range args {
+		if arg == "--help" || arg == "-h" {
+			PrintCommandHelp("close")
+			return nil
+		}
 		if arg == "--cascade" {
 			cascade = true
 		} else {
@@ -740,6 +764,10 @@ func (a *App) runCascadeClose(ctx context.Context, key string) error {
 }
 
 func (a *App) runReopen(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("reopen")
+		return nil
+	}
 	if len(args) != 1 {
 		return &CLIError{Code: "usage", Message: "usage: ait reopen <id>", ExitCode: 64}
 	}
@@ -781,7 +809,7 @@ func (a *App) runReady(ctx context.Context, args []string) error {
 
 	if err := fs.Parse(args); err != nil {
 		if isHelpRequested(err) {
-			PrintHelp()
+			PrintCommandHelp("ready")
 			return nil
 		}
 		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
@@ -808,6 +836,10 @@ func (a *App) runReady(ctx context.Context, args []string) error {
 }
 
 func (a *App) runDependency(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("dep")
+		return nil
+	}
 	if len(args) == 0 {
 		return &CLIError{Code: "usage", Message: "usage: ait dep <add|remove|list|tree> ...", ExitCode: 64}
 	}
@@ -827,6 +859,10 @@ func (a *App) runDependency(ctx context.Context, args []string) error {
 }
 
 func (a *App) runDepAdd(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("dep add")
+		return nil
+	}
 	if len(args) != 2 {
 		return &CLIError{Code: "usage", Message: "usage: ait dep add <blocked-id> <blocker-id>", ExitCode: 64}
 	}
@@ -871,6 +907,10 @@ func (a *App) runDepAdd(ctx context.Context, args []string) error {
 }
 
 func (a *App) runDepRemove(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("dep remove")
+		return nil
+	}
 	if len(args) != 2 {
 		return &CLIError{Code: "usage", Message: "usage: ait dep remove <blocked-id> <blocker-id>", ExitCode: 64}
 	}
@@ -901,6 +941,10 @@ func (a *App) runDepRemove(ctx context.Context, args []string) error {
 }
 
 func (a *App) runDepList(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("dep list")
+		return nil
+	}
 	if len(args) != 1 {
 		return &CLIError{Code: "usage", Message: "usage: ait dep list <id>", ExitCode: 64}
 	}
@@ -930,6 +974,10 @@ func (a *App) runDepList(ctx context.Context, args []string) error {
 }
 
 func (a *App) runDepTree(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("dep tree")
+		return nil
+	}
 	if len(args) != 1 {
 		return &CLIError{Code: "usage", Message: "usage: ait dep tree <id>", ExitCode: 64}
 	}
@@ -947,6 +995,10 @@ func (a *App) runDepTree(ctx context.Context, args []string) error {
 }
 
 func (a *App) runNote(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("note")
+		return nil
+	}
 	if len(args) == 0 {
 		return &CLIError{Code: "usage", Message: "usage: ait note <add|list> ...", ExitCode: 64}
 	}
@@ -962,6 +1014,10 @@ func (a *App) runNote(ctx context.Context, args []string) error {
 }
 
 func (a *App) runNoteAdd(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("note add")
+		return nil
+	}
 	if len(args) != 2 {
 		return &CLIError{Code: "usage", Message: "usage: ait note add <id> <body>", ExitCode: 64}
 	}
@@ -1010,6 +1066,10 @@ func (a *App) runNoteAdd(ctx context.Context, args []string) error {
 }
 
 func (a *App) runNoteList(ctx context.Context, args []string) error {
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		PrintCommandHelp("note list")
+		return nil
+	}
 	if len(args) != 1 {
 		return &CLIError{Code: "usage", Message: "usage: ait note list <id>", ExitCode: 64}
 	}
@@ -1035,6 +1095,10 @@ func (a *App) runExport(ctx context.Context, args []string) error {
 	var outputPath string
 	var filtered []string
 	for i := 0; i < len(args); i++ {
+		if args[i] == "--help" || args[i] == "-h" {
+			PrintCommandHelp("export")
+			return nil
+		}
 		if args[i] == "--output" && i+1 < len(args) {
 			outputPath = args[i+1]
 			i++ // skip value
@@ -1107,7 +1171,7 @@ func (a *App) runFlush(ctx context.Context, args []string) error {
 
 	if err := fs.Parse(args); err != nil {
 		if isHelpRequested(err) {
-			PrintHelp()
+			PrintCommandHelp("flush")
 			return nil
 		}
 		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
@@ -1124,35 +1188,283 @@ func (a *App) runFlush(ctx context.Context, args []string) error {
 const helpText = `Usage: ait [--db <path>] <command> [options]
 
 Commands:
-  init    --prefix <value>                   Set project prefix for issue IDs
-  config                                     Show project configuration
-  create  --title <t> [--type] [--parent]    Create a new issue
-          [--description] [--priority]
-  show    <id>                               Show issue details and notes
-  list    [--type] [--status] [--priority]   List issues
-          [--parent] [--all] [--long]
-          [--human] [--tree]
-  search  <query>                            Search issues by text
-  status                                     Show project summary counts
-  ready   [--type] [--long]                  List unblocked issues
-  update  <id> --title|--status|--priority   Update an issue
-  close   <id> [--cascade]                    Close an issue (or subtree)
-  reopen  <id>                               Reopen a closed/cancelled issue
-  cancel  <id>                               Cancel an issue
-  claim   <id> <agent-name>                  Claim an issue for an agent
-  unclaim <id>                               Release a claim
-  dep     add|remove|list|tree <id> [<id>]   Manage dependencies
-  note    add|list <id> [body]               Manage notes
-  export  <id> [--output path.md]           Export Markdown briefing
-  flush   [--dry-run]                       Purge closed/cancelled issues
-  version                                    Show version and check for updates
-  help                                       Show this help
+  init       --prefix <value>                   Set project prefix for issue IDs
+  config                                        Show project configuration
+  create     --title <t> [--type] [--parent]    Create a new issue
+             [--description] [--priority]
+  show       <id>                               Show issue details and notes
+  list       [--type] [--status] [--priority]   List issues
+             [--parent] [--all] [--long]
+             [--human] [--tree]
+  search     <query>                            Search issues by text
+  status                                        Show project summary counts
+  ready      [--type] [--long]                  List unblocked issues
+  update     <id> --title|--status|--priority   Update an issue
+  close      <id> [--cascade]                   Close an issue (or subtree)
+  reopen     <id>                               Reopen a closed/cancelled issue
+  cancel     <id>                               Cancel an issue
+  claim      <id> <agent-name>                  Claim an issue for an agent
+  unclaim    <id>                               Release a claim
+  dep        add|remove|list|tree <id> [<id>]   Manage dependencies
+  note       add|list <id> [body]               Manage notes
+  export     <id> [--output path.md]            Export Markdown briefing
+  flush      [--dry-run]                        Purge closed/cancelled issues
+  completion bash|zsh                           Print shell completion script
+  version                                       Show version and check for updates
+  help                                          Show this help
 
 Global options:
   --db <path>     Use a specific database file (default: .ait/ait.db)
   --version       Show version and check for updates
 `
 
+var commandHelp = map[string]string{
+	"init": `Usage: ait init [--prefix <value>]
+
+Set or auto-generate the project prefix used for hierarchical issue IDs.
+
+Flags:
+  --prefix <value>   Set the prefix explicitly (e.g. "myproject")
+
+Examples:
+  ait init --prefix myapp
+  ait init
+`,
+	"config": `Usage: ait config
+
+Show the current project configuration (prefix, schema version).
+`,
+	"create": `Usage: ait create --title <t> [flags]
+
+Create a new issue (task or epic).
+
+Flags:
+  --title <text>         Issue title (required)
+  --description <text>   Issue description
+  --type <task|epic>     Issue type (default: task)
+  --parent <id>          Parent issue ID (tasks only)
+  --priority <P0-P4>     Priority level (default: P2)
+
+Examples:
+  ait create --title "Add login page"
+  ait create --title "Auth Epic" --type epic --priority P1
+  ait create --title "OAuth flow" --parent PROJ-1
+`,
+	"show": `Usage: ait show <id>
+
+Show full details for an issue, including children, dependencies, and notes.
+
+Examples:
+  ait show PROJ-1
+  ait show PROJ-1.2
+`,
+	"list": `Usage: ait list [flags]
+
+List issues with optional filters and output formats.
+
+Flags:
+  --all                Include closed and cancelled issues
+  --long               Full JSON output (all fields)
+  --human              Human-readable table output
+  --tree               Tree view showing parent/child hierarchy
+  --status <status>    Filter by status (open, in_progress, closed, cancelled)
+  --type <type>        Filter by type (task, epic)
+  --priority <P0-P4>   Filter by priority
+  --parent <id>        Filter by parent issue
+
+Examples:
+  ait list
+  ait list --status open --type task
+  ait list --all --long
+  ait list --tree
+`,
+	"search": `Usage: ait search <query>
+
+Search issues by title or description (case-insensitive).
+
+Examples:
+  ait search "auth"
+  ait search "database migration"
+`,
+	"status": `Usage: ait status
+
+Show a summary of issue counts by status, plus the number of ready issues.
+`,
+	"ready": `Usage: ait ready [flags]
+
+List issues that are unblocked (all dependencies closed).
+
+Flags:
+  --long          Full JSON output
+  --type <type>   Filter by type (task, epic)
+
+Examples:
+  ait ready
+  ait ready --type task --long
+`,
+	"update": `Usage: ait update <id> [flags]
+
+Update fields on an existing issue.
+
+Flags:
+  --title <text>         New title
+  --description <text>   New description
+  --status <status>      New status (open, in_progress, closed, cancelled)
+  --priority <P0-P4>     New priority
+
+Examples:
+  ait update PROJ-1 --title "Renamed issue"
+  ait update PROJ-1 --status in_progress --priority P0
+`,
+	"close": `Usage: ait close <id> [--cascade]
+
+Close an issue. With --cascade, close the entire subtree.
+
+Flags:
+  --cascade   Also close all descendant issues
+
+Examples:
+  ait close PROJ-1
+  ait close PROJ-1 --cascade
+`,
+	"reopen": `Usage: ait reopen <id>
+
+Reopen a closed or cancelled issue (sets status back to open).
+
+Examples:
+  ait reopen PROJ-1
+`,
+	"cancel": `Usage: ait cancel <id>
+
+Cancel an issue.
+
+Examples:
+  ait cancel PROJ-1
+`,
+	"claim": `Usage: ait claim <id> <agent-name>
+
+Claim an issue for an agent. Fails if already claimed.
+
+Examples:
+  ait claim PROJ-1 builder-agent
+`,
+	"unclaim": `Usage: ait unclaim <id>
+
+Release a claim on an issue.
+
+Examples:
+  ait unclaim PROJ-1
+`,
+	"dep": `Usage: ait dep <subcommand> ...
+
+Manage issue dependencies.
+
+Subcommands:
+  add     <blocked-id> <blocker-id>   Add a dependency
+  remove  <blocked-id> <blocker-id>   Remove a dependency
+  list    <id>                         List dependencies for an issue
+  tree    <id>                         Show dependency tree
+
+Examples:
+  ait dep add PROJ-2 PROJ-1
+  ait dep list PROJ-2
+  ait dep tree PROJ-2
+`,
+	"dep add": `Usage: ait dep add <blocked-id> <blocker-id>
+
+Add a dependency: <blocked-id> is blocked by <blocker-id>.
+
+Examples:
+  ait dep add PROJ-2 PROJ-1
+`,
+	"dep remove": `Usage: ait dep remove <blocked-id> <blocker-id>
+
+Remove a dependency between two issues.
+
+Examples:
+  ait dep remove PROJ-2 PROJ-1
+`,
+	"dep list": `Usage: ait dep list <id>
+
+List all blockers and blocks for an issue.
+
+Examples:
+  ait dep list PROJ-2
+`,
+	"dep tree": `Usage: ait dep tree <id>
+
+Show the full dependency tree for an issue.
+
+Examples:
+  ait dep tree PROJ-2
+`,
+	"note": `Usage: ait note <subcommand> ...
+
+Manage issue notes.
+
+Subcommands:
+  add   <id> <body>   Add a note to an issue
+  list  <id>          List notes for an issue
+
+Examples:
+  ait note add PROJ-1 "Started implementation"
+  ait note list PROJ-1
+`,
+	"note add": `Usage: ait note add <id> <body>
+
+Add a note to an issue.
+
+Examples:
+  ait note add PROJ-1 "Completed the first pass"
+`,
+	"note list": `Usage: ait note list <id>
+
+List all notes for an issue.
+
+Examples:
+  ait note list PROJ-1
+`,
+	"export": `Usage: ait export <id> [--output path.md]
+
+Export an issue and its descendants as a Markdown briefing document.
+
+Flags:
+  --output <path>   Write to file instead of stdout
+
+Examples:
+  ait export PROJ-1
+  ait export PROJ-1 --output briefing.md
+`,
+	"flush": `Usage: ait flush [--dry-run]
+
+Purge closed/cancelled root issues whose entire subtree is also terminal.
+
+Flags:
+  --dry-run   Show what would be flushed without deleting
+
+Examples:
+  ait flush --dry-run
+  ait flush
+`,
+	"completion": `Usage: ait completion <bash|zsh>
+
+Print a shell completion script to stdout. Source it in your shell profile.
+
+Examples:
+  eval "$(ait completion bash)"
+  ait completion zsh > ~/.zsh/completions/_ait
+`,
+}
+
 func PrintHelp() {
 	fmt.Print(helpText)
+}
+
+// PrintCommandHelp prints help for a specific command, falling back to global help.
+func PrintCommandHelp(cmd string) {
+	if text, ok := commandHelp[cmd]; ok {
+		fmt.Print(text)
+		return
+	}
+	PrintHelp()
 }
