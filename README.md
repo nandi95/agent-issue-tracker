@@ -41,7 +41,7 @@ It's not designed to handle cross-team shared issues, work, projects.  The inter
 - `list` (`--type`, `--status`, `--priority`, `--parent`, `--all`, `--long`, `--human`, `--tree`)
 - `status`
 - `search`
-- `update`
+- `update` (`--title`, `--description`, `--status`, `--priority`)
 - `close` (`--cascade`)
 - `reopen`
 - `cancel`

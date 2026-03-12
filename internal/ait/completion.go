@@ -1,15 +1,18 @@
 package ait
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // RunCompletion prints a shell completion script for the given shell.
 func RunCompletion(shell string) error {
 	switch shell {
 	case "bash":
-		fmt.Print(bashCompletionScript)
+		fmt.Print(generateBashCompletion())
 		return nil
 	case "zsh":
-		fmt.Print(zshCompletionScript)
+		fmt.Print(generateZshCompletion())
 		return nil
 	default:
 		return &CLIError{
@@ -20,7 +23,25 @@ func RunCompletion(shell string) error {
 	}
 }
 
-const bashCompletionScript = `_ait_completions() {
+func generateBashCompletion() string {
+	cmdNames := strings.Join(CommandNames(), " ")
+
+	// Build per-command flag completion cases from the registry.
+	var flagCases strings.Builder
+	for _, cmd := range commands {
+		if len(cmd.Flags) == 0 {
+			continue
+		}
+		flags := strings.Join(cmd.Flags, " ")
+		fmt.Fprintf(&flagCases, "        %s)\n", cmd.Name)
+		fmt.Fprintf(&flagCases, "            if [[ \"${cur}\" == -* ]]; then\n")
+		fmt.Fprintf(&flagCases, "                COMPREPLY=($(compgen -W \"%s\" -- \"${cur}\"))\n", flags)
+		fmt.Fprintf(&flagCases, "                return\n")
+		fmt.Fprintf(&flagCases, "            fi\n")
+		fmt.Fprintf(&flagCases, "            ;;&\n")
+	}
+
+	return fmt.Sprintf(`_ait_completions() {
     local cur prev words cword
     # Use _init_completion if available (bash-completion package),
     # otherwise set variables manually for compatibility.
@@ -34,7 +55,7 @@ const bashCompletionScript = `_ait_completions() {
         cword=${COMP_CWORD}
     fi
 
-    local commands="init config create show list search status ready update close reopen cancel claim unclaim dep note export flush completion version help"
+    local commands="%s"
     local dep_subcmds="add remove list tree"
     local note_subcmds="add list"
     local completion_subcmds="bash zsh"
@@ -52,13 +73,30 @@ const bashCompletionScript = `_ait_completions() {
 
     local cmd="${words[1]}"
 
+    # Value completions for flags that take specific values.
+    case "${cmd}" in
+        list|create|update|ready)
+            case "${prev}" in
+                --status)   COMPREPLY=($(compgen -W "${statuses}" -- "${cur}")); return ;;
+                --type)     COMPREPLY=($(compgen -W "${types}" -- "${cur}")); return ;;
+                --priority) COMPREPLY=($(compgen -W "${priorities}" -- "${cur}")); return ;;
+                --parent)
+                    local ids
+                    ids=$(ait list --all 2>/dev/null | grep -o '"id": *"[^"]*"' | sed 's/"id": *"//;s/"//')
+                    COMPREPLY=($(compgen -W "${ids}" -- "${cur}"))
+                    return
+                    ;;
+            esac
+            ;;
+    esac
+
+    # Subcommand and special-case completions.
     case "${cmd}" in
         dep)
             if [[ ${cword} -eq 2 ]]; then
                 COMPREPLY=($(compgen -W "${dep_subcmds}" -- "${cur}"))
                 return
             fi
-            # Issue ID completion for dep subcommands
             if [[ ${cword} -ge 3 && "${cur}" != -* ]]; then
                 local ids
                 ids=$(ait list --all 2>/dev/null | grep -o '"id": *"[^"]*"' | sed 's/"id": *"//;s/"//')
@@ -71,7 +109,6 @@ const bashCompletionScript = `_ait_completions() {
                 COMPREPLY=($(compgen -W "${note_subcmds}" -- "${cur}"))
                 return
             fi
-            # Issue ID completion for note subcommands
             if [[ ${cword} -eq 3 && "${cur}" != -* ]]; then
                 local ids
                 ids=$(ait list --all 2>/dev/null | grep -o '"id": *"[^"]*"' | sed 's/"id": *"//;s/"//')
@@ -85,83 +122,8 @@ const bashCompletionScript = `_ait_completions() {
             fi
             return
             ;;
-        list)
-            case "${prev}" in
-                --status)  COMPREPLY=($(compgen -W "${statuses}" -- "${cur}")); return ;;
-                --type)    COMPREPLY=($(compgen -W "${types}" -- "${cur}")); return ;;
-                --priority) COMPREPLY=($(compgen -W "${priorities}" -- "${cur}")); return ;;
-                --parent)
-                    local ids
-                    ids=$(ait list --all 2>/dev/null | grep -o '"id": *"[^"]*"' | sed 's/"id": *"//;s/"//')
-                    COMPREPLY=($(compgen -W "${ids}" -- "${cur}"))
-                    return
-                    ;;
-            esac
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=($(compgen -W "--all --long --human --tree --status --type --priority --parent" -- "${cur}"))
-            fi
-            return
-            ;;
-        create)
-            case "${prev}" in
-                --type)     COMPREPLY=($(compgen -W "${types}" -- "${cur}")); return ;;
-                --priority) COMPREPLY=($(compgen -W "${priorities}" -- "${cur}")); return ;;
-                --parent)
-                    local ids
-                    ids=$(ait list --all 2>/dev/null | grep -o '"id": *"[^"]*"' | sed 's/"id": *"//;s/"//')
-                    COMPREPLY=($(compgen -W "${ids}" -- "${cur}"))
-                    return
-                    ;;
-            esac
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=($(compgen -W "--title --description --type --parent --priority" -- "${cur}"))
-            fi
-            return
-            ;;
-        update)
-            case "${prev}" in
-                --status)   COMPREPLY=($(compgen -W "${statuses}" -- "${cur}")); return ;;
-                --priority) COMPREPLY=($(compgen -W "${priorities}" -- "${cur}")); return ;;
-            esac
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=($(compgen -W "--title --description --status --priority --parent" -- "${cur}"))
-                return
-            fi
-            ;;&
-        ready)
-            case "${prev}" in
-                --type) COMPREPLY=($(compgen -W "${types}" -- "${cur}")); return ;;
-            esac
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=($(compgen -W "--long --type" -- "${cur}"))
-                return
-            fi
-            ;;
-        close)
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=($(compgen -W "--cascade" -- "${cur}"))
-                return
-            fi
-            ;;&
-        export)
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=($(compgen -W "--output" -- "${cur}"))
-                return
-            fi
-            ;;&
-        flush)
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=($(compgen -W "--dry-run" -- "${cur}"))
-            fi
-            return
-            ;;
-        init)
-            if [[ "${cur}" == -* ]]; then
-                COMPREPLY=($(compgen -W "--prefix" -- "${cur}"))
-            fi
-            return
-            ;;
-    esac
+        # Per-command flag completions (generated from registry).
+%s    esac
 
     # Issue ID completion for commands that take IDs
     for c in ${id_commands}; do
@@ -175,35 +137,22 @@ const bashCompletionScript = `_ait_completions() {
 }
 
 complete -F _ait_completions ait
-`
+`, cmdNames, flagCases.String())
+}
 
-const zshCompletionScript = `#compdef ait
+func generateZshCompletion() string {
+	// Build command descriptions for zsh from registry.
+	var cmdDescs strings.Builder
+	for _, cmd := range commands {
+		fmt.Fprintf(&cmdDescs, "        '%s:%s'\n", cmd.Name, cmd.Summary)
+	}
+
+	return fmt.Sprintf(`#compdef ait
 
 _ait() {
     local -a commands
     commands=(
-        'init:Set project prefix for issue IDs'
-        'config:Show project configuration'
-        'create:Create a new issue'
-        'show:Show issue details and notes'
-        'list:List issues'
-        'search:Search issues by text'
-        'status:Show project summary counts'
-        'ready:List unblocked issues'
-        'update:Update an issue'
-        'close:Close an issue'
-        'reopen:Reopen a closed/cancelled issue'
-        'cancel:Cancel an issue'
-        'claim:Claim an issue for an agent'
-        'unclaim:Release a claim'
-        'dep:Manage dependencies'
-        'note:Manage notes'
-        'export:Export Markdown briefing'
-        'flush:Purge closed/cancelled issues'
-        'completion:Print shell completion script'
-        'version:Show version'
-        'help:Show help'
-    )
+%s    )
 
     local -a statuses=(open in_progress closed cancelled)
     local -a types=(task epic)
@@ -321,4 +270,5 @@ _ait() {
 }
 
 _ait "$@"
-`
+`, cmdDescs.String())
+}

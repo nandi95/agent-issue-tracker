@@ -16,24 +16,21 @@ func main() {
 		ait.ExitWithError(ait.NormalizeError(err))
 	}
 
-	if len(args) == 0 || args[0] == "help" || args[0] == "--help" {
+	if len(args) == 0 {
 		ait.PrintHelp()
 		return
 	}
 
-	if args[0] == "version" || args[0] == "--version" {
-		if err := ait.RunVersion(); err != nil {
-			ait.ExitWithError(ait.NormalizeError(err))
-		}
-		return
+	// Handle --help and --version as aliases for help/version commands.
+	if args[0] == "--help" {
+		args[0] = "help"
+	} else if args[0] == "--version" {
+		args[0] = "version"
 	}
 
-	if args[0] == "completion" {
-		if len(args) < 2 {
-			ait.PrintCommandHelp("completion")
-			return
-		}
-		if err := ait.RunCompletion(args[1]); err != nil {
+	cmd, ok := ait.LookupCommand(args[0])
+	if ok && !cmd.NeedsDB {
+		if err := cmd.Run(nil, ctx, args[1:]); err != nil {
 			ait.ExitWithError(ait.NormalizeError(err))
 		}
 		return

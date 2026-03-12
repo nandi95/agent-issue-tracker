@@ -1853,3 +1853,22 @@ func TestFlushOnEmptyDatabase(t *testing.T) {
 		}
 	})
 }
+
+func TestUpdateDescription(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		runJSONCommand[map[string]any](t, a, []string{"init", "--prefix", "desc"}, nil)
+
+		var created ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Test issue", "--description", "Original"}, &created)
+
+		var updated ait.Issue
+		runJSONCommand(t, a, []string{"update", created.ID, "--description", "Updated description"}, &updated)
+
+		if updated.Description != "Updated description" {
+			t.Fatalf("expected description %q, got %q", "Updated description", updated.Description)
+		}
+		if updated.Title != "Test issue" {
+			t.Fatalf("title should be unchanged, got %q", updated.Title)
+		}
+	})
+}
