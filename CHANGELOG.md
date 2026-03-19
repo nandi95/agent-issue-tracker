@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-03-19
+
+### Added
+- `--reason <text>` flag on `close` — automatically adds a note with the reason before closing the issue.
+- `@file` syntax for `--description` on `create` and `update` — reads description content from a file (e.g. `--description @spec.md`).
+
+### Changed
+- Clearer validation message when attempting to add a task directly under an initiative — now suggests creating an epic first.
+
 ## [1.2.0] - 2026-03-13
 
 ### Added
@@ -58,7 +67,8 @@ First stable release. Core feature set:
 - Forward-only schema migration system
 - Custom database path via `--db`
 
-[Unreleased]: https://github.com/ohnotnow/agent-issue-tracker/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/ohnotnow/agent-issue-tracker/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/ohnotnow/agent-issue-tracker/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/ohnotnow/agent-issue-tracker/compare/v1.1.2...v1.2.0
 [1.1.2]: https://github.com/ohnotnow/agent-issue-tracker/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/ohnotnow/agent-issue-tracker/compare/v1.1.0...v1.1.1
