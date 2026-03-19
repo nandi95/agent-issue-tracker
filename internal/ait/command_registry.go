@@ -92,7 +92,7 @@ Create a new issue (task, epic, or initiative).
 
 Flags:
   --title <text>         Issue title (required)
-  --description <text>   Issue description
+  --description <text>   Issue description (use @file to read from a file)
   --type <task|epic|initiative>  Issue type (default: task)
   --parent <id>          Parent issue ID (tasks and epics)
   --priority <P0-P4>     Priority level (default: P2)
@@ -102,6 +102,7 @@ Examples:
   ait create --title "Auth Epic" --type epic --priority P1
   ait create --title "OAuth flow" --parent PROJ-1
   ait create --title "Auth Initiative" --type initiative --priority P0
+  ait create --title "Feature" --description @spec.md
 `,
 			Flags:   []string{"--title", "--description", "--type", "--parent", "--priority"},
 			NeedsDB: true,
@@ -215,7 +216,7 @@ Update fields on an existing issue.
 
 Flags:
   --title <text>         New title
-  --description <text>   New description
+  --description <text>   New description (use @file to read from a file)
   --status <status>      New status (open, in_progress, closed, cancelled)
   --priority <P0-P4>     New priority
 
@@ -233,18 +234,21 @@ Examples:
 			Name:    "close",
 			Summary: "Close an issue (or subtree)",
 			Args:    "<id>",
-			Help: `Usage: ait close <id> [--cascade]
+			Help: `Usage: ait close <id> [--cascade] [--reason <text>]
 
 Close an issue. With --cascade, close the entire subtree.
+With --reason, a note is added before closing.
 
 Flags:
-  --cascade   Also close all descendant issues
+  --cascade        Also close all descendant issues
+  --reason <text>  Add a note with the reason before closing
 
 Examples:
   ait close PROJ-1
   ait close PROJ-1 --cascade
+  ait close PROJ-1 --reason "Superseded by new approach"
 `,
-			Flags:   []string{"--cascade"},
+			Flags:   []string{"--cascade", "--reason"},
 			NeedsDB: true,
 			Run: func(a *App, ctx context.Context, args []string) error {
 				return a.runClose(ctx, args)

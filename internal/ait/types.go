@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -95,6 +96,9 @@ func ValidateParentType(childType, parentType string) error {
 			return &CLIError{Code: "validation", Message: "epics can only have an initiative as parent", ExitCode: 65}
 		}
 	case "task":
+		if parentType == "initiative" {
+			return &CLIError{Code: "validation", Message: "tasks cannot be direct children of initiatives — create an epic under the initiative first, then add tasks to that epic", ExitCode: 65}
+		}
 		if parentType != "epic" && parentType != "task" {
 			return &CLIError{Code: "validation", Message: "tasks can only have an epic or task as parent", ExitCode: 65}
 		}
@@ -161,6 +165,24 @@ func NewID() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(buf), nil
+}
+
+// ResolveDescription handles the @file convention for description values.
+// If the value starts with "@", the remainder is treated as a file path and
+// the file contents are returned. Otherwise the value is returned as-is.
+func ResolveDescription(value string) (string, error) {
+	if !strings.HasPrefix(value, "@") {
+		return value, nil
+	}
+	path := value[1:]
+	if path == "" {
+		return "", &CLIError{Code: "validation", Message: "@file description requires a file path (e.g. --description @notes.txt)", ExitCode: 65}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", &CLIError{Code: "io", Message: fmt.Sprintf("cannot read description file: %s", err), ExitCode: 66}
+	}
+	return string(data), nil
 }
 
 func NowUTC() string {

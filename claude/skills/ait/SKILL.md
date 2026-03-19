@@ -46,6 +46,7 @@ ait create --title "Title" --type epic                   # Epic (group of tasks)
 ait create --title "Title" --type epic --parent <init-id>  # Epic under an initiative
 ait create --title "Title" --parent <epic-id>            # Task under an epic
 ait create --title "Title" --description "Details..."    # With description
+ait create --title "Title" --description @spec.md        # Description from file
 ait create --title "Title" --priority P1                 # With priority
 ```
 
@@ -61,6 +62,7 @@ ait update <id> --priority P0          # Change priority
 ```bash
 ait close <id>                # Close a single issue
 ait close <id> --cascade      # Close an epic and all its descendants
+ait close <id> --reason "Done — merged in PR #42"  # Add a note then close
 ait cancel <id>               # Cancel an issue
 ait reopen <id>               # Reopen a closed or cancelled issue
 ```
@@ -104,10 +106,20 @@ the current holder's name.
 
 The agent-name parameter is for you to have a little creative fun if you want to.  You're free to use your real name, or pick a name that amuses and delights you or a project-specific name for your 'agentic persona'.  If the user seems like a terribly serious person - maybe steer away from 'plush-plush-tooshie-shake' though ;-)  It's important to pick one name and stick with it though!
 
-## Issue Types
-- `initiative` — the strategic "why": vision, goals, and key decisions behind a group of epics. Top-level only (no parent). When working through tasks, refer back to the initiative to resolve judgement calls.
-- `epic` — container for related tasks. Can be top-level or a child of an initiative.
-- `task` (default) — a unit of work. Child of an epic (or another task for subtasks).
+## Issue Types & Hierarchy
+
+The three issue types form a strict hierarchy: **initiative > epic > task**.
+
+- `initiative` — the strategic "why": vision, goals, and key decisions behind a group of epics. **Top-level only** (cannot have a parent).
+- `epic` — container for related tasks. Can be top-level or a child of an initiative. **Cannot** be a child of another epic or task.
+- `task` (default) — a unit of work. Child of an epic or another task (for subtasks). **Cannot** be a direct child of an initiative.
+
+To build a full three-tier structure:
+1. Create the initiative: `ait create --title "Vision" --type initiative`
+2. Create an epic under it: `ait create --title "Phase 1" --type epic --parent <initiative-id>`
+3. Create tasks under the epic: `ait create --title "Do X" --parent <epic-id>`
+
+**Common mistake**: trying to add a task directly under an initiative. You need an epic in between.
 
 ## Priorities
 - `P0` — critical / urgent

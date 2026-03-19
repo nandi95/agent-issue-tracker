@@ -103,6 +103,11 @@ func (a *App) runCreate(ctx context.Context, args []string) error {
 	if strings.TrimSpace(*title) == "" {
 		return &CLIError{Code: "validation", Message: "title is required", ExitCode: 65}
 	}
+	resolved, err := ResolveDescription(*description)
+	if err != nil {
+		return err
+	}
+	*description = resolved
 	if err := ValidateIssueType(*issueType); err != nil {
 		return err
 	}
@@ -445,6 +450,14 @@ func (a *App) runUpdate(ctx context.Context, args []string) error {
 		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
 	}
 
+	if *description != "" {
+		resolved, err := ResolveDescription(*description)
+		if err != nil {
+			return err
+		}
+		*description = resolved
+	}
+
 	current, err := a.fetchIssueByInternalID(ctx, internalID)
 	if err != nil {
 		return err
@@ -637,24 +650,38 @@ func (a *App) runUnclaim(ctx context.Context, args []string) error {
 }
 
 func (a *App) runClose(ctx context.Context, args []string) error {
-	// Extract --cascade from anywhere in the args since flag.Parse stops
-	// at the first non-flag argument and the ID is positional.
+	// Extract --cascade and --reason from anywhere in the args since
+	// flag.Parse stops at the first non-flag argument and the ID is positional.
 	cascade := false
+	var reason string
 	var filtered []string
-	for _, arg := range args {
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
 		if arg == "--help" || arg == "-h" {
 			PrintCommandHelp("close")
 			return nil
 		}
 		if arg == "--cascade" {
 			cascade = true
+		} else if arg == "--reason" && i+1 < len(args) {
+			reason = args[i+1]
+			i++
+		} else if strings.HasPrefix(arg, "--reason=") {
+			reason = strings.TrimPrefix(arg, "--reason=")
 		} else {
 			filtered = append(filtered, arg)
 		}
 	}
 
 	if len(filtered) != 1 {
-		return &CLIError{Code: "usage", Message: "usage: ait close <id> [--cascade]", ExitCode: 64}
+		return &CLIError{Code: "usage", Message: "usage: ait close <id> [--cascade] [--reason <text>]", ExitCode: 64}
+	}
+
+	// If --reason was given, add a note before closing.
+	if strings.TrimSpace(reason) != "" {
+		if err := a.runNoteAdd(ctx, []string{filtered[0], "Closed: " + reason}); err != nil {
+			return err
+		}
 	}
 
 	if cascade {

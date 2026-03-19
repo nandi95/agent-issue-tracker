@@ -38,6 +38,7 @@ There are three issue types, forming a natural hierarchy:
 ait create --title "Auth overhaul" --type initiative --priority P0
 ait create --title "OAuth Epic" --type epic --parent <initiative-id>
 ait create --title "Login page" --parent <epic-id>
+ait create --title "Login page" --description @spec.md   # description from file
 ```
 
 The hierarchy is reflected in the ID structure: `proj-abc` (initiative) -> `proj-abc.1` (epic) -> `proj-abc.1.1` (task).
@@ -58,7 +59,7 @@ It's not designed to handle cross-team shared issues, work, projects.  The inter
 - `status`
 - `search`
 - `update` (`--title`, `--description`, `--status`, `--priority`)
-- `close` (`--cascade`)
+- `close` (`--cascade`, `--reason`)
 - `reopen`
 - `cancel`
 - `claim`
@@ -151,6 +152,27 @@ ait unclaim <id>               # release the claim
 ```
 
 If an issue is already claimed by another agent, `claim` returns a conflict error with the current holder's name. Claims are visible in `show` output via `claimed_by` and `claimed_at` fields.
+
+## Description from File
+
+The `--description` flag on `create` and `update` supports reading from a file using the `@file` convention (familiar from tools like `curl`). This avoids shell escaping problems with long descriptions containing quotes, backticks, or newlines:
+
+```bash
+ait create --title "Auth overhaul" --description @design-doc.md
+ait update <id> --description @updated-spec.txt
+```
+
+If the value starts with `@`, the remainder is treated as a file path and the contents are used as the description. Without the `@` prefix, the value is used as a literal string as before.
+
+## Close with Reason
+
+The `close` command accepts an optional `--reason` flag that adds a note before closing, leaving a breadcrumb for why something was closed:
+
+```bash
+ait close <id> --reason "Superseded by new approach"
+```
+
+This is equivalent to running `ait note add <id> "Closed: ..."` followed by `ait close <id>`, but in a single command. It can be combined with `--cascade`.
 
 ## Cascade Close
 

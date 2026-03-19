@@ -844,7 +844,7 @@ func TestCreateTaskWithInitiativeParent(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected validation error for task with initiative parent")
 		}
-		if !strings.Contains(err.Error(), "tasks can only have an epic or task as parent") {
+		if !strings.Contains(err.Error(), "tasks cannot be direct children of initiatives") {
 			t.Fatalf("unexpected error: %s", err.Error())
 		}
 	})
