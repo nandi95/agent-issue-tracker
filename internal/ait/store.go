@@ -283,10 +283,17 @@ func (a *App) readyIssues(ctx context.Context, typeFilter string) ([]Issue, erro
 		     JOIN issues blockers ON blockers.id = d.blocker_id
 		     WHERE d.blocked_id = i.id
 		       AND blockers.status != ?
+		   )
+		   AND NOT EXISTS (
+		     SELECT 1
+		     FROM issue_dependencies pd
+		     JOIN issues pblockers ON pblockers.id = pd.blocker_id
+		     WHERE pd.blocked_id = i.parent_id
+		       AND pblockers.status != ?
 		   )`,
 		issueSelectColumns("i"),
 	)
-	params := []any{StatusOpen, StatusInProgress, StatusClosed}
+	params := []any{StatusOpen, StatusInProgress, StatusClosed, StatusClosed}
 	if typeFilter != "" {
 		query += ` AND i.type = ?`
 		params = append(params, typeFilter)
@@ -306,10 +313,17 @@ func (a *App) readyIssueRefs(ctx context.Context, typeFilter string) ([]IssueRef
 		     JOIN issues blockers ON blockers.id = d.blocker_id
 		     WHERE d.blocked_id = i.id
 		       AND blockers.status != ?
+		   )
+		   AND NOT EXISTS (
+		     SELECT 1
+		     FROM issue_dependencies pd
+		     JOIN issues pblockers ON pblockers.id = pd.blocker_id
+		     WHERE pd.blocked_id = i.parent_id
+		       AND pblockers.status != ?
 		   )`,
 		issueRefSelectColumns("i"),
 	)
-	params := []any{StatusOpen, StatusInProgress, StatusClosed}
+	params := []any{StatusOpen, StatusInProgress, StatusClosed, StatusClosed}
 	if typeFilter != "" {
 		query += ` AND i.type = ?`
 		params = append(params, typeFilter)

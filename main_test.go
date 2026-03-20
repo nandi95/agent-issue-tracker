@@ -2057,3 +2057,101 @@ func TestUpdateDescription(t *testing.T) {
 		}
 	})
 }
+
+// --- Ready respects parent epic dependencies ---
+
+func TestReadyRespectsParentEpicDependencies(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		// Create an initiative with two epics (phases).
+		var init ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Migration", "--type", "initiative"}, &init)
+
+		var phase1 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Phase 1: Scaffolding", "--type", "epic", "--parent", init.ID}, &phase1)
+
+		var phase2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Phase 2: API", "--type", "epic", "--parent", init.ID}, &phase2)
+
+		// Phase 2 is blocked by Phase 1.
+		runJSONCommand[map[string]any](t, a, []string{"dep", "add", phase2.ID, phase1.ID}, nil)
+
+		// Add tasks to each phase.
+		var task1 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Scaffold models", "--type", "task", "--parent", phase1.ID}, &task1)
+
+		var task2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Build endpoints", "--type", "task", "--parent", phase2.ID}, &task2)
+
+		// task2 has no direct task-level blockers, but its parent epic is blocked.
+		// It should NOT appear in ready.
+		var ready struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"ready", "--type", "task"}, &ready)
+
+		for _, iss := range ready.Issues {
+			if iss.ID == task2.ID {
+				t.Fatalf("task %s should not be ready — its parent epic is blocked by %s", task2.ID, phase1.ID)
+			}
+		}
+
+		// task1 should be ready (its parent epic has no blockers).
+		found := false
+		for _, iss := range ready.Issues {
+			if iss.ID == task1.ID {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("task1 should be ready but was not returned")
+		}
+
+		// Now close Phase 1 — task2 should become ready.
+		runJSONCommand[ait.Issue](t, a, []string{"close", phase1.ID, "--cascade"}, nil)
+
+		var readyAfter struct {
+			Issues []ait.IssueRef `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"ready", "--type", "task"}, &readyAfter)
+
+		found = false
+		for _, iss := range readyAfter.Issues {
+			if iss.ID == task2.ID {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("task2 should be ready after Phase 1 is closed, but was not returned")
+		}
+	})
+}
+
+func TestReadyRespectsParentEpicDepsLongFormat(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var init ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Project", "--type", "initiative"}, &init)
+
+		var epicA ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Epic A", "--type", "epic", "--parent", init.ID}, &epicA)
+
+		var epicB ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Epic B", "--type", "epic", "--parent", init.ID}, &epicB)
+
+		runJSONCommand[map[string]any](t, a, []string{"dep", "add", epicB.ID, epicA.ID}, nil)
+
+		var task ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Task in B", "--type", "task", "--parent", epicB.ID}, &task)
+
+		// --long uses readyIssues (full Issue objects), verify it also respects parent deps.
+		var ready struct {
+			Issues []ait.Issue `json:"issues"`
+		}
+		runJSONCommand(t, a, []string{"ready", "--type", "task", "--long"}, &ready)
+
+		for _, iss := range ready.Issues {
+			if iss.ID == task.ID {
+				t.Fatalf("task %s should not be ready (--long) — parent epic is blocked", task.ID)
+			}
+		}
+	})
+}
