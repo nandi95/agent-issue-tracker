@@ -208,6 +208,7 @@ Examples:
 		},
 		{
 			Name:    "update",
+			Aliases: []string{"edit"},
 			Summary: "Update an issue",
 			Args:    "<id>",
 			Help: `Usage: ait update <id> [flags]

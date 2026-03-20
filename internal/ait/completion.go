@@ -33,7 +33,8 @@ func generateBashCompletion() string {
 			continue
 		}
 		flags := strings.Join(cmd.Flags, " ")
-		fmt.Fprintf(&flagCases, "        %s)\n", cmd.Name)
+		names := append([]string{cmd.Name}, cmd.Aliases...)
+		fmt.Fprintf(&flagCases, "        %s)\n", strings.Join(names, "|"))
 		fmt.Fprintf(&flagCases, "            if [[ \"${cur}\" == -* ]]; then\n")
 		fmt.Fprintf(&flagCases, "                COMPREPLY=($(compgen -W \"%s\" -- \"${cur}\"))\n", flags)
 		fmt.Fprintf(&flagCases, "                return\n")
@@ -64,7 +65,7 @@ func generateBashCompletion() string {
     local priorities="P0 P1 P2 P3 P4"
 
     # Commands that accept an issue ID as first positional arg
-    local id_commands="show update close reopen cancel claim unclaim export"
+    local id_commands="show update edit close reopen cancel claim unclaim export"
 
     if [[ ${cword} -eq 1 ]]; then
         COMPREPLY=($(compgen -W "${commands}" -- "${cur}"))
@@ -75,7 +76,7 @@ func generateBashCompletion() string {
 
     # Value completions for flags that take specific values.
     case "${cmd}" in
-        list|create|update|ready)
+        list|create|update|edit|ready)
             case "${prev}" in
                 --status)   COMPREPLY=($(compgen -W "${statuses}" -- "${cur}")); return ;;
                 --type)     COMPREPLY=($(compgen -W "${types}" -- "${cur}")); return ;;
@@ -145,6 +146,9 @@ func generateZshCompletion() string {
 	var cmdDescs strings.Builder
 	for _, cmd := range commands {
 		fmt.Fprintf(&cmdDescs, "        '%s:%s'\n", cmd.Name, cmd.Summary)
+		for _, alias := range cmd.Aliases {
+			fmt.Fprintf(&cmdDescs, "        '%s:%s (alias for %s)'\n", alias, cmd.Summary, cmd.Name)
+		}
 	}
 
 	return fmt.Sprintf(`#compdef ait
@@ -221,7 +225,7 @@ _ait() {
                 '--parent[Parent issue]:id:_ait_issue_ids' \
                 '--priority[Priority]:priority:(${priorities})'
             ;;
-        update)
+        update|edit)
             if (( CURRENT == 3 )); then
                 _ait_issue_ids
             else

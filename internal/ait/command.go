@@ -9,6 +9,7 @@ import (
 // Command describes a single CLI subcommand.
 type Command struct {
 	Name    string
+	Aliases []string // alternative names that resolve to this command
 	Summary string   // one-liner for both global and per-command help
 	Args    string   // positional args pattern, e.g. "<id>", "<query>", "bash|zsh"
 	Help    string   // full per-command help text (hand-written, with examples)
@@ -26,6 +27,9 @@ func init() {
 	commandsByName = make(map[string]*Command, len(commands))
 	for i := range commands {
 		commandsByName[commands[i].Name] = &commands[i]
+		for _, alias := range commands[i].Aliases {
+			commandsByName[alias] = &commands[i]
+		}
 	}
 	subcommandHelp = registerSubcommandHelp()
 }
@@ -36,11 +40,12 @@ func LookupCommand(name string) (*Command, bool) {
 	return cmd, ok
 }
 
-// CommandNames returns all command names in registration order.
+// CommandNames returns all command names (including aliases) in registration order.
 func CommandNames() []string {
-	names := make([]string, len(commands))
-	for i, cmd := range commands {
-		names[i] = cmd.Name
+	var names []string
+	for _, cmd := range commands {
+		names = append(names, cmd.Name)
+		names = append(names, cmd.Aliases...)
 	}
 	return names
 }
@@ -80,7 +85,11 @@ func generateHelpText() string {
 
 	for _, cmd := range commands {
 		usage := usageSummary(cmd)
-		fmt.Fprintf(&b, "  %-10s %-35s %s\n", cmd.Name, usage, cmd.Summary)
+		summary := cmd.Summary
+		if len(cmd.Aliases) > 0 {
+			summary += " (alias: " + strings.Join(cmd.Aliases, ", ") + ")"
+		}
+		fmt.Fprintf(&b, "  %-10s %-35s %s\n", cmd.Name, usage, summary)
 	}
 
 	b.WriteString(`

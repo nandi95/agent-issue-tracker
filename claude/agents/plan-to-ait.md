@@ -216,7 +216,17 @@ This section is critical - it ensures Claude understands this is a completed rep
 ### Priorities
 - P1: Foundation work (must be done first)
 - P2: Core features (main implementation)
-- P3: Polish and tests (after core is working)
+- P3: Polish and non-critical enhancements
+
+### Testing belongs inside each issue, not in a separate issue
+The implementing agent follows TDD — tests are written first, then implementation.
+Never create standalone "write tests" or "update tests" issues. Each implementation
+issue's acceptance criteria ARE the tests. The implementing agent writes a failing
+test, makes it pass, then moves to the next criterion.
+
+If an issue changes behaviour, its acceptance criteria should reflect the new
+behaviour. The agent will write tests to match. Do not create a follow-up issue
+to "fix up the tests afterwards" — that invites retrofitting.
 
 ### Phase Tracker Issues
 Create a tracker issue for each phase (e.g., "Phase 2: Service layer"). These:
@@ -231,6 +241,7 @@ Create a tracker issue for each phase (e.g., "Phase 2: Service layer"). These:
 - Create overly granular issues (one per line of code)
 - Create issues without enough detail to execute
 - Skip the epic vision document
+- Create separate "testing" issues — tests belong inside each implementation issue
 
 ## The Amnesia Test - Examples
 
