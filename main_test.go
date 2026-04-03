@@ -2166,11 +2166,14 @@ func TestFlushRecordsHistory(t *testing.T) {
 
 		runJSONCommand[ait.FlushResult](t, a, []string{"flush"}, nil)
 
-		var entries []ait.FlushHistoryEntry
+		var entries []ait.FlushHistoryEntrySummary
 		runJSONCommand(t, a, []string{"log"}, &entries)
 
 		if len(entries) != 1 {
 			t.Fatalf("expected 1 log entry, got %d", len(entries))
+		}
+		if entries[0].ItemCount != 1 {
+			t.Fatalf("expected item_count 1, got %d", entries[0].ItemCount)
 		}
 		if len(entries[0].Items) != 1 {
 			t.Fatalf("expected 1 item in log entry, got %d", len(entries[0].Items))
@@ -2189,7 +2192,7 @@ func TestFlushRecordsSummary(t *testing.T) {
 
 		runJSONCommand[ait.FlushResult](t, a, []string{"flush", "--summary", "Effing postgres"}, nil)
 
-		var entries []ait.FlushHistoryEntry
+		var entries []ait.FlushHistoryEntrySummary
 		runJSONCommand(t, a, []string{"log"}, &entries)
 
 		if len(entries) != 1 {
@@ -2209,8 +2212,9 @@ func TestFlushRecordsCloseReason(t *testing.T) {
 
 		runJSONCommand[ait.FlushResult](t, a, []string{"flush"}, nil)
 
+		// Close reason only visible in --long output.
 		var entries []ait.FlushHistoryEntry
-		runJSONCommand(t, a, []string{"log"}, &entries)
+		runJSONCommand(t, a, []string{"log", "--long"}, &entries)
 
 		if len(entries) != 1 {
 			t.Fatalf("expected 1 log entry, got %d", len(entries))
@@ -2236,21 +2240,34 @@ func TestFlushRecordsHierarchy(t *testing.T) {
 
 		runJSONCommand[ait.FlushResult](t, a, []string{"flush"}, nil)
 
-		var entries []ait.FlushHistoryEntry
-		runJSONCommand(t, a, []string{"log"}, &entries)
+		// Slim: only the root (epic), with item_count covering all 3.
+		var slim []ait.FlushHistoryEntrySummary
+		runJSONCommand(t, a, []string{"log"}, &slim)
 
-		if len(entries) != 1 {
-			t.Fatalf("expected 1 log entry, got %d", len(entries))
+		if len(slim) != 1 {
+			t.Fatalf("expected 1 log entry, got %d", len(slim))
 		}
-		if len(entries[0].Items) != 3 {
-			t.Fatalf("expected 3 items, got %d", len(entries[0].Items))
+		if slim[0].ItemCount != 3 {
+			t.Fatalf("expected item_count 3, got %d", slim[0].ItemCount)
 		}
-		// Root should have no parent.
-		if entries[0].Items[0].ParentPublicID != nil {
-			t.Fatalf("expected root item to have no parent, got %v", entries[0].Items[0].ParentPublicID)
+		if len(slim[0].Items) != 1 {
+			t.Fatalf("expected 1 root item in slim output, got %d", len(slim[0].Items))
 		}
-		// Children should reference the epic.
-		if entries[0].Items[1].ParentPublicID == nil || *entries[0].Items[1].ParentPublicID != epic.ID {
+		if slim[0].Items[0].PublicID != epic.ID {
+			t.Fatalf("expected root item to be %s, got %s", epic.ID, slim[0].Items[0].PublicID)
+		}
+
+		// Long: all 3 items with parent relationships.
+		var full []ait.FlushHistoryEntry
+		runJSONCommand(t, a, []string{"log", "--long"}, &full)
+
+		if len(full[0].Items) != 3 {
+			t.Fatalf("expected 3 items in long output, got %d", len(full[0].Items))
+		}
+		if full[0].Items[0].ParentPublicID != nil {
+			t.Fatalf("expected root item to have no parent, got %v", full[0].Items[0].ParentPublicID)
+		}
+		if full[0].Items[1].ParentPublicID == nil || *full[0].Items[1].ParentPublicID != epic.ID {
 			t.Fatalf("expected child parent to be %s", epic.ID)
 		}
 	})
@@ -2264,7 +2281,7 @@ func TestFlushDryRunDoesNotRecordHistory(t *testing.T) {
 
 		runJSONCommand[ait.FlushResult](t, a, []string{"flush", "--dry-run"}, nil)
 
-		var entries []ait.FlushHistoryEntry
+		var entries []ait.FlushHistoryEntrySummary
 		runJSONCommand(t, a, []string{"log"}, &entries)
 
 		if len(entries) != 0 {
@@ -2275,7 +2292,6 @@ func TestFlushDryRunDoesNotRecordHistory(t *testing.T) {
 
 func TestLogLastFlag(t *testing.T) {
 	testApp(t, func(ctx context.Context, a *ait.App) {
-		// Create and flush three separate tasks to get three history entries.
 		for _, title := range []string{"First", "Second", "Third"} {
 			var task ait.Issue
 			runJSONCommand(t, a, []string{"create", "--title", title}, &task)
@@ -2283,13 +2299,13 @@ func TestLogLastFlag(t *testing.T) {
 			runJSONCommand[ait.FlushResult](t, a, []string{"flush"}, nil)
 		}
 
-		var all []ait.FlushHistoryEntry
+		var all []ait.FlushHistoryEntrySummary
 		runJSONCommand(t, a, []string{"log"}, &all)
 		if len(all) != 3 {
 			t.Fatalf("expected 3 log entries, got %d", len(all))
 		}
 
-		var limited []ait.FlushHistoryEntry
+		var limited []ait.FlushHistoryEntrySummary
 		runJSONCommand(t, a, []string{"log", "--last", "2"}, &limited)
 		if len(limited) != 2 {
 			t.Fatalf("expected 2 log entries with --last 2, got %d", len(limited))
@@ -2299,7 +2315,7 @@ func TestLogLastFlag(t *testing.T) {
 
 func TestLogEmptyDatabase(t *testing.T) {
 	testApp(t, func(ctx context.Context, a *ait.App) {
-		var entries []ait.FlushHistoryEntry
+		var entries []ait.FlushHistoryEntrySummary
 		runJSONCommand(t, a, []string{"log"}, &entries)
 
 		if len(entries) != 0 {
@@ -2310,14 +2326,116 @@ func TestLogEmptyDatabase(t *testing.T) {
 
 func TestFlushEmptyDoesNotRecordHistory(t *testing.T) {
 	testApp(t, func(ctx context.Context, a *ait.App) {
-		// Flush with nothing to flush.
 		runJSONCommand[ait.FlushResult](t, a, []string{"flush"}, nil)
 
-		var entries []ait.FlushHistoryEntry
+		var entries []ait.FlushHistoryEntrySummary
 		runJSONCommand(t, a, []string{"log"}, &entries)
 
 		if len(entries) != 0 {
 			t.Fatalf("expected 0 log entries when nothing flushed, got %d", len(entries))
+		}
+	})
+}
+
+// --- Log search tests ---
+
+func TestLogSearchMatchesTitle(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var t1 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Fix migration bug"}, &t1)
+		var t2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Add login page"}, &t2)
+		runJSONCommand[ait.Issue](t, a, []string{"close", t1.ID}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"close", t2.ID}, nil)
+		runJSONCommand[ait.FlushResult](t, a, []string{"flush"}, nil)
+
+		var entries []ait.FlushHistoryEntrySummary
+		runJSONCommand(t, a, []string{"log", "--search", "migration"}, &entries)
+
+		if len(entries) != 1 {
+			t.Fatalf("expected 1 log entry, got %d", len(entries))
+		}
+		if len(entries[0].Items) != 1 {
+			t.Fatalf("expected 1 matching item, got %d", len(entries[0].Items))
+		}
+		if entries[0].Items[0].Title != "Fix migration bug" {
+			t.Fatalf("expected matching title %q, got %q", "Fix migration bug", entries[0].Items[0].Title)
+		}
+	})
+}
+
+func TestLogSearchMatchesCloseReason(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var task ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Schema work"}, &task)
+		runJSONCommand[ait.Issue](t, a, []string{"close", task.ID, "--reason", "Fixed migration ordering"}, nil)
+		runJSONCommand[ait.FlushResult](t, a, []string{"flush"}, nil)
+
+		var entries []ait.FlushHistoryEntrySummary
+		runJSONCommand(t, a, []string{"log", "--search", "migration"}, &entries)
+
+		if len(entries) != 1 {
+			t.Fatalf("expected 1 log entry, got %d", len(entries))
+		}
+		if entries[0].Items[0].Title != "Schema work" {
+			t.Fatalf("expected title %q, got %q", "Schema work", entries[0].Items[0].Title)
+		}
+	})
+}
+
+func TestLogSearchCaseInsensitive(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var task ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Fix migration bug"}, &task)
+		runJSONCommand[ait.Issue](t, a, []string{"close", task.ID}, nil)
+		runJSONCommand[ait.FlushResult](t, a, []string{"flush"}, nil)
+
+		var entries []ait.FlushHistoryEntrySummary
+		runJSONCommand(t, a, []string{"log", "--search", "MIGRATION"}, &entries)
+
+		if len(entries) != 1 {
+			t.Fatalf("expected 1 log entry, got %d", len(entries))
+		}
+	})
+}
+
+func TestLogSearchNoMatch(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var task ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Something"}, &task)
+		runJSONCommand[ait.Issue](t, a, []string{"close", task.ID}, nil)
+		runJSONCommand[ait.FlushResult](t, a, []string{"flush"}, nil)
+
+		var entries []ait.FlushHistoryEntrySummary
+		runJSONCommand(t, a, []string{"log", "--search", "nonexistent"}, &entries)
+
+		if len(entries) != 0 {
+			t.Fatalf("expected 0 log entries, got %d", len(entries))
+		}
+	})
+}
+
+func TestLogSearchWithLong(t *testing.T) {
+	testApp(t, func(ctx context.Context, a *ait.App) {
+		var t1 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Migration fix"}, &t1)
+		var t2 ait.Issue
+		runJSONCommand(t, a, []string{"create", "--title", "Unrelated"}, &t2)
+		runJSONCommand[ait.Issue](t, a, []string{"close", t1.ID, "--reason", "Fixed ordering"}, nil)
+		runJSONCommand[ait.Issue](t, a, []string{"close", t2.ID}, nil)
+		runJSONCommand[ait.FlushResult](t, a, []string{"flush"}, nil)
+
+		var entries []ait.FlushHistoryEntry
+		runJSONCommand(t, a, []string{"log", "--search", "migration", "--long"}, &entries)
+
+		if len(entries) != 1 {
+			t.Fatalf("expected 1 log entry, got %d", len(entries))
+		}
+		if len(entries[0].Items) != 1 {
+			t.Fatalf("expected 1 matching item, got %d", len(entries[0].Items))
+		}
+		if entries[0].Items[0].CloseReason != "Fixed ordering" {
+			t.Fatalf("expected close reason %q, got %q", "Fixed ordering", entries[0].Items[0].CloseReason)
 		}
 	})
 }

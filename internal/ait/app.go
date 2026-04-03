@@ -1183,6 +1183,8 @@ func (a *App) runLog(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("log", flag.ContinueOnError)
 	last := fs.Int("last", 0, "")
 	since := fs.String("since", "", "")
+	long := fs.Bool("long", false, "")
+	search := fs.String("search", "", "")
 	fs.SetOutput(io.Discard)
 
 	if err := fs.Parse(args); err != nil {
@@ -1198,6 +1200,56 @@ func (a *App) runLog(ctx context.Context, args []string) error {
 		return err
 	}
 
-	return PrintJSON(entries)
+	// Apply search filter if set.
+	if strings.TrimSpace(*search) != "" {
+		term := strings.ToLower(strings.TrimSpace(*search))
+		var filtered []FlushHistoryEntry
+		for _, e := range entries {
+			var matchingItems []FlushHistoryItem
+			for _, item := range e.Items {
+				if strings.Contains(strings.ToLower(item.Title), term) ||
+					strings.Contains(strings.ToLower(item.CloseReason), term) {
+					matchingItems = append(matchingItems, item)
+				}
+			}
+			if len(matchingItems) > 0 {
+				e.Items = matchingItems
+				filtered = append(filtered, e)
+			}
+		}
+		entries = filtered
+	}
+
+	if *long {
+		if entries == nil {
+			entries = make([]FlushHistoryEntry, 0)
+		}
+		return PrintJSON(entries)
+	}
+
+	// Slim output: root items only (unless searching), with item count.
+	summaries := make([]FlushHistoryEntrySummary, 0, len(entries))
+	isSearching := strings.TrimSpace(*search) != ""
+	for _, e := range entries {
+		s := FlushHistoryEntrySummary{
+			ID:        e.ID,
+			Summary:   e.Summary,
+			FlushedAt: e.FlushedAt,
+			ItemCount: len(e.Items),
+			Items:     make([]FlushHistoryItemRef, 0),
+		}
+		for _, item := range e.Items {
+			if isSearching || item.ParentPublicID == nil {
+				s.Items = append(s.Items, FlushHistoryItemRef{
+					PublicID:  item.PublicID,
+					Type:      item.Type,
+					Title:     item.Title,
+					Priority:  item.Priority,
+				})
+			}
+		}
+		summaries = append(summaries, s)
+	}
+	return PrintJSON(summaries)
 }
 

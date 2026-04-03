@@ -411,20 +411,26 @@ Examples:
 		{
 			Name:    "log",
 			Summary: "Show flush history",
-			Help: `Usage: ait log [--last <n>] [--since <date>]
+			Help: `Usage: ait log [--last <n>] [--since <date>] [--search <term>] [--long]
 
 Show the history of flushed issues. Entries are shown newest first.
 
+By default, shows a summary with root-level items only. Use --long for
+full output including all child items and close reasons.
+
 Flags:
-  --last <n>       Show only the last n flush events
-  --since <date>   Show flushes since this date (RFC3339 or YYYY-MM-DD)
+  --last <n>         Show only the last n flush events
+  --since <date>     Show flushes since this date (RFC3339 or YYYY-MM-DD)
+  --search <term>    Filter to items matching term (title or close reason)
+  --long             Full output with all items and close reasons
 
 Examples:
-  ait log
-  ait log --last 5
+  ait log --last 3
+  ait log --search "migration"
+  ait log --search "auth" --long
   ait log --since 2026-04-01
 `,
-			Flags:   []string{"--last", "--since"},
+			Flags:   []string{"--last", "--since", "--search", "--long"},
 			NeedsDB: true,
 			Run: func(a *App, ctx context.Context, args []string) error {
 				return a.runLog(ctx, args)
