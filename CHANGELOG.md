@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-04-03
+
+### Added
+- **Flush history** — `flush` now records all flushed issues into the database before deleting them, preserving a searchable record of completed work.
+- `--summary` flag on `flush` — attach an editorial note describing what was accomplished (e.g. `ait flush --summary "Fixed pg compatibility"`).
+- `log` command — view flush history with slim/long output modes, `--last`, `--since`, and `--search` flags.
+- `log purge` subcommand — compact old history by removing per-issue items while keeping summary rows (`--keep`, `--before`), or fully delete old entries with `--full`.
+- Schema migration (v4) to add `flush_history` and `flush_history_items` tables.
+
+### Changed
+- `flush` help text updated to document `--summary` and history recording.
+
 ## [1.2.2] - 2026-03-20
 
 ### Added
@@ -75,7 +87,8 @@ First stable release. Core feature set:
 - Forward-only schema migration system
 - Custom database path via `--db`
 
-[Unreleased]: https://github.com/ohnotnow/agent-issue-tracker/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/ohnotnow/agent-issue-tracker/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/ohnotnow/agent-issue-tracker/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/ohnotnow/agent-issue-tracker/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/ohnotnow/agent-issue-tracker/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/ohnotnow/agent-issue-tracker/compare/v1.1.2...v1.2.0
