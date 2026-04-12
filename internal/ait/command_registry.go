@@ -102,15 +102,17 @@ Show the current project configuration (prefix, schema version).
 			Name:    "create",
 			Summary: "Create a new issue",
 			Help: `Usage: ait create --title <t> [flags]
+       ait create --human [flags]
 
 Create a new issue (task, epic, or initiative).
 
 Flags:
-  --title <text>         Issue title (required)
+  --title <text>         Issue title (required unless --human)
   --description <text>   Issue description (use @file to read from a file)
   --type <task|epic|initiative>  Issue type (default: task)
   --parent <id>          Parent issue ID (tasks and epics)
   --priority <P0-P4>     Priority level (default: P2)
+  --human                Open $EDITOR for title and description (like git commit)
 
 Examples:
   ait create --title "Add login page"
@@ -118,8 +120,9 @@ Examples:
   ait create --title "OAuth flow" --parent PROJ-1
   ait create --title "Auth Initiative" --type initiative --priority P0
   ait create --title "Feature" --description @spec.md
+  ait create --human --type epic --priority P1
 `,
-			Flags:   []string{"--title", "--description", "--type", "--parent", "--priority"},
+			Flags:   []string{"--title", "--description", "--type", "--parent", "--priority", "--human"},
 			NeedsDB: true,
 			Run: func(a *App, ctx context.Context, args []string) error {
 				return a.runCreate(ctx, args)

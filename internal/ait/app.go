@@ -90,6 +90,7 @@ func (a *App) runCreate(ctx context.Context, args []string) error {
 	issueType := fs.String("type", "task", "")
 	parentID := fs.String("parent", "", "")
 	priority := fs.String("priority", "P2", "")
+	human := fs.Bool("human", false, "")
 	fs.SetOutput(io.Discard)
 
 	if err := fs.Parse(args); err != nil {
@@ -98,6 +99,15 @@ func (a *App) runCreate(ctx context.Context, args []string) error {
 			return nil
 		}
 		return &CLIError{Code: "usage", Message: err.Error(), ExitCode: 64}
+	}
+
+	if *human {
+		edTitle, edDesc, err := EditIssueMessage()
+		if err != nil {
+			return err
+		}
+		*title = edTitle
+		*description = edDesc
 	}
 
 	if strings.TrimSpace(*title) == "" {
